@@ -42,7 +42,6 @@
         "USOIL": ["US OIL", "USOIL", "XTI/USD", "CRUDEOIL", "WTI", "WTI/USD", "USOUSD"],
         "UKOIL": ["UKOIL", "XBR/USD", "BRENT", "BRENT/USD"],
         "BTCUSD": ["BTCUSD", "BTC/USD", "BITCOIN"],
-        "ETHUSD": ["ETHUSD", "ETH/USD", "ETHEREUM"],
         "Volatility150(1s)Index": ["Volatility 150 (1s) Index"],
         "Volatility250(1s)Index": ["Volatility 250 (1s) Index"],
         "DEX1500DOWNINDEX": ["DEX 1500 DOWN INDEX"],

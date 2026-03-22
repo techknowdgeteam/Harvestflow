@@ -1,0 +1,23 @@
+{
+    "deriv_k": {
+        "id": "deriv_k",
+        "broker": "Deriv",
+        "email": "kennyking8128@gmail.com",
+        "fullname": "Arobieke kehinde-bybit",
+        "application_status": "approved",
+        "broker_balance": "100.00",
+        "profitandloss": "0.00",
+        "submitted_at": "NULL",
+        "balance_display": "show",
+        "execution_start_date": "2026-03-03",
+        "trades": "NULL",
+        "contract_days_left": "30",
+        "message": "NULL",
+        "unauthorized_actions": "NULL",
+        "LOGIN_ID": "5996427",
+        "PASSWORD": "@Techknowdge12#",
+        "SERVER": "deriv-demo",
+        "INVESTED_WITH": "deriv6_structural-liquidity",
+        "TERMINAL_PATH": "C:\\xampp\\htdocs\\synapse\\mt5\\MetaTrader 5 Deriv d\\terminal64.exe"
+    }
+}
