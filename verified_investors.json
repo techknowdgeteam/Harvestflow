@@ -1,23 +1,29 @@
 {
-    "deriv_k": {
-        "id": "deriv_k",
-        "broker": "Deriv",
+    "1": {
+        "id": "1",
+        "broker": "Bybit",
         "email": "kennyking8128@gmail.com",
         "fullname": "Arobieke kehinde-bybit",
+        "server": "Bybit-Live",
+        "login": "4836528",
+        "password": "@Techknowdge12#",
         "application_status": "approved",
-        "broker_balance": "100.00",
+        "broker_balance": "1.00",
         "profitandloss": "0.00",
+        "passkey": "$2y$10$u75VL06K32NAS/c1oSzEEuPF5LuMXgiErN06mw2Anwoiervo6d3Ha",
         "submitted_at": "NULL",
-        "balance_display": "show",
-        "execution_start_date": "2026-03-03",
+        "balance_display": "NULL",
+        "execution_start_date": "2026-03-22",
+        "broker_balance_history": "NULL",
+        "execution_dates_history": "NULL",
+        "profitandlosshistory": "NULL",
         "trades": "NULL",
-        "contract_days_left": "30",
+        "tradeshistory": "NULL",
+        "loyalties": "NULL",
+        "contract_days_left": "NULL",
+        "paymentdetails": "NULL",
         "message": "NULL",
         "unauthorized_actions": "NULL",
-        "LOGIN_ID": "5996427",
-        "PASSWORD": "@Techknowdge12#",
-        "SERVER": "deriv-demo",
-        "INVESTED_WITH": "deriv6_structural-liquidity",
-        "TERMINAL_PATH": "C:\\xampp\\htdocs\\synapse\\mt5\\MetaTrader 5 Deriv d\\terminal64.exe"
+        "TERMINAL_PATH": "C:\\xampp\\htdocs\\chronedge\\synarex\\mt5\\MetaTrader 5 Bybit 1\\terminal64.exe"
     }
 }

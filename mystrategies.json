@@ -1,64 +1,205 @@
 {
-        "chart":{
+    "symbols_dictionary": {
+        "double-levels":{
+          "xxxusd": []
+        },
+        "key-level":{
+          "xxxusd": ["EURUSD"]
+        },
+        "structural-liquidity":{
+          "xxxusd": []
+        },
+        "xxxjpy": ["USDJPY", "EURJPY", "GBPJPY", "AUDJPY", "NZDJPY", "CADJPY", "CHFJPY"],
+        "xxxusd": ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD"],
+        "xxxaud": ["EURAUD", "GBPAUD"],
+        "xxxnzd": ["EURNZD", "GBPNZD", "AUDNZD"],
+        "usdxxx": ["USDJPY", "USDCAD", "USDCHF"],
+        "xxxchf": ["EURCHF", "GBPCHF", "AUDCHF", "NZDCHF", "CADCHF", "USDCHF"],
+        "xxxcad": ["EURCAD", "GBPCAD", "AUDCAD", "NZDCAD", "USDCAD"],
+        "xxxbasket": ["AUD_BASKET", "EUR_BASKET", "GBP_BASKET", "USD_BASKET", "JPY_BASKET"],
+        "indices": ["US TECH 100", "DJ30", "US SP 500", "GER40", "FRA40", "UK100", "AUS200", "EUSTX50", "JPN225"],
+        "metals": ["XAUUSD"],
+        "energies": ["USOIL", "UKOIL", "XNGUSD"],
+        "synthetics": []
+    },
+    "settings":{
+        "minimum_balance": 50,
+        "restrict_order_from_timeframe":"",
+        "custom_selection":{
+            "orders_per_symbol": "all",
+            "if_not_all_filter_buy_by": "lowest",
+            "if_not_all_filter_sells_by": "highest"
+        }
+    },
+    "chart":{
+        "maximum_holding_days": 0,
         "define_candles": {
             "entries_poi_condition": {
-                "apprehend_higherhighsandlowerlows":{
-                    "entry_1": {
-                        "new_filename": "key_level",
+                "apprehend_swing_points":{
+                    "entry_7": {
+                        "new_filename": "STRUCTURAL-LIQUIDITY",
+                        "enable_entry_poi_confirmation": false,
+                        "poi_confirmation_timeframes": {"4h":["1h","30m","15m"],"1h":["30m","15m"],"30m":["15m","5m"],"15m":["5m"]},
                         "number_candles": "define_candle",
                         "process_receiver_files": "yes",
                         "identify_definitions": {
                             "define_1": {
-                                "type": "swing_candle"
+                                "type": "swing_candle",
+                                "enable_drawing": true,
+                                "tool": "horizontal_line",
+                                "text": "def 1"
                             },
                             "define_2": {
                                 "type": "define_1_type_identical",
-                                "condition": "behind_define_1"
+                                "condition": "beyond_define_1",
+                                "minimum_collectivebeyondcandles": null,
+                                "enable_drawing": true,
+                                "tool": "dashed_horizontal_line",
+                                "text": "def 2"
                             },
                             "define_3": {
                                 "type": "define_2_type_identical",
-                                "condition": "behind_define_2"
+                                "condition": "beyond_define_2",
+                                "find_optional_extreme": true,
+                                "minimum_collectivebeyondcandles": null,
+                                "enable_drawing": true,
+                                "tool": "horizontal_line",
+                                "text": "def 3"
                             },
                             "define_4": {
-                                "type": "define_3_type_opposite",
-                                "condition": "behind_define_1"
+                                "type": "define_3_type_identical",
+                                "condition": "beyond_define_3",
+                                "enable_drawing": true,
+                                "minimum_collectivebeyondcandles": 0,
+                                "tool": "horizontal_line",
+                                "text": "def 4"
+                            },
+                            "define_5": {
+                                "type": "define_4_type_opposite",
+                                "condition": "behind_define_3",
+                                "enable_drawing": true,
+                                "tool": "horizontal_line",
+                                "text": "def 5"
                             }
                         },
                         "point_of_interest": {
                             "drawing_tool":"box",
-                            "from_subject":"define_1",
-                            "after_subject":"define_3",
-                            "subject_is_higherhigh_or_lowerhigh":"low_price",
-                            "subject_is_lowerlow_or_higherlow":"high_price",
-                            "restrict_definitions_mitigation":"define_2, define_3",
-                            "restrict_swing_mitigation_between_definitions":"define_1_define_2, define_1_define_3, define_2_define_3",
-                            "multiple_selection":"define_3_non_extreme"
+                            "from_subject":"define_3",
+                            "after_subject":"define_5",
+                            "subject_is_swinghigh_or_lowerhigh":"low_price",
+                            "subject_is_swinglow_or_higherlow":"high_price",
+                            "restrict_definitions_mitigation":"",
+                            "restrict_swing_mitigation_between_definitions":"",
+                            "multiple_selection":"define_4_extreme",
+                            "max_selection": 2
                         },
                         "record_prices": {
                             "risk_reward": 3,
                             "order_type":{
-                                "subject_is_higherhigh_or_lowerhigh":"sell_limit",
-                                "subject_is_lowerlow_or_higherlow":"buy_limit"
+                                "subject_is_swinghigh_or_lowerhigh":"sell_limit",
+                                "subject_is_swinglow_or_higherlow":"buy_limit"
                             },
                             "entry":{
                                 "subject":"define_1",
-                                "subject_is_higherhigh_or_lowerhigh":"low_price",
-                                "subject_is_lowerlow_or_higherlow":"high_price"
+                                "subject_is_swinghigh_or_lowerhigh":"low_price",
+                                "subject_is_swinglow_or_higherlow":"high_price"
                             },
                             "exit":{
-                                "subject":"",
-                                "subject_is_higherhigh_or_lowerhigh":"high_price",
-                                "subject_is_lowerlow_or_higherlow":"low_price"
+                                "subject":"define_1",
+                                "subject_is_swinghigh_or_lowerhigh":"high_price",
+                                "subject_is_swinglow_or_higherlow":"low_price"
                             },
                             "target":{
-                                "subject":"define_4",
-                                "subject_is_higherhigh_or_lowerhigh":"high_price",
-                                "subject_is_lowerlow_or_higherlow":"low_price"
+                                "subject":"",
+                                "subject_is_swinghigh_or_lowerhigh":"high_price",
+                                "subject_is_swinglow_or_higherlow":"low_price"
                             }
                         }
                     },
-                    "entry_2": {
-                        "new_filename": "structural_liquidity",
+                    "entry_5": {
+                        "new_filename": "STRUCTURAL-LIQUIDITY",
+                        "enable_entry_poi_confirmation": false,
+                        "poi_confirmation_timeframes": {"4h":["1h","30m","15m"],"1h":["30m","15m"],"30m":["15m","5m"],"15m":["5m"]},
+                        "number_candles": "define_candle",
+                        "process_receiver_files": "yes",
+                        "identify_definitions": {
+                            "define_1": {
+                                "type": "swing_candle",
+                                "enable_drawing": true,
+                                "tool": "horizontal_line",
+                                "text": "def 1"
+                            },
+                            "define_2": {
+                                "type": "define_1_type_identical",
+                                "condition": "beyond_define_1",
+                                "minimum_collectivebeyondcandles": null,
+                                "enable_drawing": true,
+                                "tool": "dashed_horizontal_line",
+                                "text": "def 2"
+                            },
+                            "define_3": {
+                                "type": "define_2_type_identical",
+                                "condition": "beyond_define_2",
+                                "find_optional_extreme": true,
+                                "minimum_collectivebeyondcandles": null,
+                                "enable_drawing": true,
+                                "tool": "horizontal_line",
+                                "text": "def 3"
+                            },
+                            "define_4": {
+                                "type": "define_3_type_identical",
+                                "condition": "beyond_define_3",
+                                "enable_drawing": true,
+                                "minimum_collectivebeyondcandles": 2,
+                                "tool": "horizontal_line",
+                                "text": "def 4"
+                            },
+                            "define_5": {
+                                "type": "define_4_type_opposite",
+                                "condition": "behind_define_3",
+                                "enable_drawing": true,
+                                "tool": "horizontal_line",
+                                "text": "def 5"
+                            }
+                        },
+                        "point_of_interest": {
+                            "drawing_tool":"box",
+                            "from_subject":"define_3",
+                            "after_subject":"define_5",
+                            "subject_is_swinghigh_or_lowerhigh":"low_price",
+                            "subject_is_swinglow_or_higherlow":"high_price",
+                            "restrict_definitions_mitigation":"",
+                            "restrict_swing_mitigation_between_definitions":"",
+                            "multiple_selection":"define_4_extreme",
+                            "max_selection": 2
+                        },
+                        "record_prices": {
+                            "risk_reward": 3,
+                            "order_type":{
+                                "subject_is_swinghigh_or_lowerhigh":"sell_limit",
+                                "subject_is_swinglow_or_higherlow":"buy_limit"
+                            },
+                            "entry":{
+                                "subject":"define_1",
+                                "subject_is_swinghigh_or_lowerhigh":"low_price",
+                                "subject_is_swinglow_or_higherlow":"high_price"
+                            },
+                            "exit":{
+                                "subject":"define_1",
+                                "subject_is_swinghigh_or_lowerhigh":"high_price",
+                                "subject_is_swinglow_or_higherlow":"low_price"
+                            },
+                            "target":{
+                                "subject":"",
+                                "subject_is_swinghigh_or_lowerhigh":"high_price",
+                                "subject_is_swinglow_or_higherlow":"low_price"
+                            }
+                        }
+                    },
+                    "entry_6": {
+                        "new_filename": "STRUCTURAL-LIQUIDITY-MAIN",
+                        "enable_entry_poi_confirmation": false,
+                        "poi_confirmation_timeframes": {"4h":["1h","30m","15m"],"1h":["30m","15m"]},
                         "number_candles": "define_candle",
                         "process_receiver_files": "yes",
                         "identify_definitions": {
@@ -72,12 +213,308 @@
                             "define_3": {
                                 "type": "define_2_type_opposite",
                                 "condition": "beyond_define_1",
-                                "minimum_collectivebeyondcandles": 4
+                                "minimum_collectivebeyondcandles": 4,
+                                "enable_drawing": true,
+                                "tool": "horizontal_line",
+                                "text": "liquidity Zone"
                             },
                             "define_4": {
                                 "type": "define_3_type_opposite",
                                 "condition": "beyond_define_2",
-                                "minimum_collectivebeyondcandles": null
+                                "minimum_collectivebeyondcandles": null,
+                                "enable_drawing": true,
+                                "tool": "dashed_horizontal_line",
+                                "text": "MSS"
+                            },
+                            "define_5": {
+                                "type": "define_4_type_opposite",
+                                "condition": "behind_define_1"
+                            }
+                        },
+                        "point_of_interest": {
+                            "drawing_tool":"box",
+                            "from_subject":"define_1",
+                            "after_subject":"define_5",
+                            "subject_is_higherhigh_or_lowerhigh":"low_price",
+                            "subject_is_lowerlow_or_higherlow":"high_price",
+                            "restrict_definitions_mitigation":"define_5",
+                            "restrict_swing_mitigation_between_definitions":"define_4_define_5",
+                            "multiple_selection":"define_5_extreme"
+                        },
+                        "record_prices": {
+                            "risk_reward": 3,
+                            "order_type":{
+                                "subject_is_higherhigh_or_lowerhigh":"sell_limit",
+                                "subject_is_lowerlow_or_higherlow":"buy_limit"
+                            },
+                            "entry":{
+                                "subject":"define_1",
+                                "subject_is_higherhigh_or_lowerhigh":"low_price",
+                                "subject_is_lowerlow_or_higherlow":"high_price"
+                            },
+                            "exit":{
+                                "subject":"define_1",
+                                "subject_is_higherhigh_or_lowerhigh":"high_price",
+                                "subject_is_lowerlow_or_higherlow":"low_price"
+                            },
+                            "target":{
+                                "subject":"",
+                                "subject_is_higherhigh_or_lowerhigh":"high_price",
+                                "subject_is_lowerlow_or_higherlow":"low_price"
+                            }
+                        }
+                    },
+                    "entry_1": {
+                        "new_filename": "STRUCTURAL-LIQUIDITY-1",
+                        "enable_entry_poi_confirmation": true,
+                        "poi_confirmation_timeframes": {"4h":["1h","30m","15m"],"1h":["30m","15m"],"30m":["15m","5m"],"15m":["5m"]},
+                        "number_candles": "define_candle",
+                        "process_receiver_files": "yes",
+                        "identify_definitions": {
+                            "define_1": {
+                                "type": "swing_candle",
+                                "enable_drawing": false,
+                                "tool": "horizontal_line",
+                                "text": "BOS"
+                            },
+                            "define_2": {
+                                "type": "define_1_type_opposite",
+                                "condition": "behind_define_1",
+                                "enable_drawing": false,
+                                "tool": "horizontal_line",
+                                "text": "BOS"
+                            },
+                            "define_3": {
+                                "type": "define_2_type_opposite",
+                                "condition": "beyond_define_1",
+                                "minimum_collectivebeyondcandles": 4,
+                                "enable_drawing": false,
+                                "tool": "dashed_horizontal_line",
+                                "text": "liquidity Zone"
+                            },
+                            "define_4": {
+                                "type": "define_3_type_identical",
+                                "condition": "beyond_define_3",
+                                "minimum_collectivebeyondcandles": null,
+                                "enable_drawing": true,
+                                "tool": "horizontal_line",
+                                "text": "BOS"
+                            },
+                            "define_5": {
+                                "type": "define_4_type_opposite",
+                                "condition": "behind_define_1",
+                                "enable_drawing": true,
+                                "tool": "dashed_horizontal_line",
+                                "text": "MSS"
+                            }
+                        },
+                        "point_of_interest": {
+                            "drawing_tool":"box",
+                            "from_subject":"define_1",
+                            "after_subject":"define_5",
+                            "subject_is_swinghigh_or_lowerhigh":"low_price",
+                            "subject_is_swinglow_or_higherlow":"high_price",
+                            "restrict_definitions_mitigation":"define_5",
+                            "restrict_swing_mitigation_between_definitions":"define_4_define_5",
+                            "multiple_selection":"define_5_extreme"
+                        },
+                        "record_prices": {
+                            "risk_reward": 3,
+                            "order_type":{
+                                "subject_is_swinghigh_or_lowerhigh":"sell_limit",
+                                "subject_is_swinglow_or_higherlow":"buy_limit"
+                            },
+                            "entry":{
+                                "subject":"define_1",
+                                "subject_is_swinghigh_or_lowerhigh":"low_price",
+                                "subject_is_swinglow_or_higherlow":"high_price"
+                            },
+                            "exit":{
+                                "subject":"define_3",
+                                "subject_is_swinghigh_or_lowerhigh":"high_price",
+                                "subject_is_swinglow_or_higherlow":"low_price"
+                            },
+                            "target":{
+                                "subject":"",
+                                "subject_is_swinghigh_or_lowerhigh":"high_price",
+                                "subject_is_swinglow_or_higherlow":"low_price"
+                            }
+                        }
+                    },
+                    "entry_2": {
+                        "new_filename": "STRUCTURAL-LIQUIDITY-2",
+                        "enable_entry_poi_confirmation": true,
+                        "poi_confirmation_timeframes": {"4h":["1h","30m","15m"],"1h":["30m","15m"],"30m":["15m","5m"],"15m":["5m"]},
+                        "number_candles": "define_candle",
+                        "process_receiver_files": "yes",
+                        "identify_definitions": {
+                            "define_1": {
+                                "type": "swing_candle",
+                                "enable_drawing": false,
+                                "tool": "horizontal_line",
+                                "text": "BOS"
+                            },
+                            "define_2": {
+                                "type": "define_1_type_opposite",
+                                "condition": "behind_define_1",
+                                "enable_drawing": false,
+                                "tool": "horizontal_line",
+                                "text": "BOS"
+                            },
+                            "define_3": {
+                                "type": "define_2_type_opposite",
+                                "condition": "beyond_define_1",
+                                "minimum_collectivebeyondcandles": 4,
+                                "enable_drawing": false,
+                                "tool": "dashed_horizontal_line",
+                                "text": "liquidity Zone"
+                            },
+                            "define_4": {
+                                "type": "define_3_type_identical",
+                                "condition": "beyond_define_3",
+                                "minimum_collectivebeyondcandles": null,
+                                "enable_drawing": true,
+                                "tool": "horizontal_line",
+                                "text": "BOS"
+                            },
+                            "define_5": {
+                                "type": "define_4_type_opposite",
+                                "condition": "behind_define_1",
+                                "enable_drawing": true,
+                                "tool": "dashed_horizontal_line",
+                                "text": "MSS"
+                            }
+                        },
+                        "point_of_interest": {
+                            "drawing_tool":"box",
+                            "from_subject":"define_1",
+                            "after_subject":"define_5",
+                            "subject_is_swinghigh_or_lowerhigh":"low_price",
+                            "subject_is_swinglow_or_higherlow":"high_price",
+                            "restrict_definitions_mitigation":"define_5",
+                            "restrict_swing_mitigation_between_definitions":"define_4_define_5",
+                            "multiple_selection":"define_5_extreme"
+                        },
+                        "record_prices": {
+                            "risk_reward": 3,
+                            "order_type":{
+                                "subject_is_swinghigh_or_lowerhigh":"sell_limit",
+                                "subject_is_swinglow_or_higherlow":"buy_limit"
+                            },
+                            "entry":{
+                                "subject":"define_1",
+                                "subject_is_swinghigh_or_lowerhigh":"low_price",
+                                "subject_is_swinglow_or_higherlow":"high_price"
+                            },
+                            "exit":{
+                                "subject":"define_3",
+                                "subject_is_swinghigh_or_lowerhigh":"high_price",
+                                "subject_is_swinglow_or_higherlow":"low_price"
+                            },
+                            "target":{
+                                "subject":"",
+                                "subject_is_swinghigh_or_lowerhigh":"high_price",
+                                "subject_is_swinglow_or_higherlow":"low_price"
+                            }
+                        }
+                    },
+                    "entry_3": {
+                        "new_filename": "STRUCTURAL-LIQUIDITY-MAIN1",
+                        "enable_entry_poi_confirmation": true,
+                        "poi_confirmation_timeframes": {"4h":["1h","30m","15m"],"1h":["30m","15m"]},
+                        "number_candles": "define_candle",
+                        "process_receiver_files": "yes",
+                        "identify_definitions": {
+                            "define_1": {
+                                "type": "swing_candle"
+                            },
+                            "define_2": {
+                                "type": "define_1_type_opposite",
+                                "condition": "behind_define_1"
+                            },
+                            "define_3": {
+                                "type": "define_2_type_opposite",
+                                "condition": "beyond_define_1",
+                                "minimum_collectivebeyondcandles": 4,
+                                "enable_drawing": true,
+                                "tool": "horizontal_line",
+                                "text": "liquidity Zone"
+                            },
+                            "define_4": {
+                                "type": "define_3_type_opposite",
+                                "condition": "beyond_define_2",
+                                "minimum_collectivebeyondcandles": null,
+                                "enable_drawing": true,
+                                "tool": "dashed_horizontal_line",
+                                "text": "MSS"
+                            },
+                            "define_5": {
+                                "type": "define_4_type_opposite",
+                                "condition": "behind_define_1"
+                            }
+                        },
+                        "point_of_interest": {
+                            "drawing_tool":"box",
+                            "from_subject":"define_1",
+                            "after_subject":"define_5",
+                            "subject_is_higherhigh_or_lowerhigh":"low_price",
+                            "subject_is_lowerlow_or_higherlow":"high_price",
+                            "restrict_definitions_mitigation":"define_5",
+                            "restrict_swing_mitigation_between_definitions":"define_4_define_5",
+                            "multiple_selection":"define_5_extreme"
+                        },
+                        "record_prices": {
+                            "risk_reward": 3,
+                            "order_type":{
+                                "subject_is_higherhigh_or_lowerhigh":"sell_limit",
+                                "subject_is_lowerlow_or_higherlow":"buy_limit"
+                            },
+                            "entry":{
+                                "subject":"define_1",
+                                "subject_is_higherhigh_or_lowerhigh":"low_price",
+                                "subject_is_lowerlow_or_higherlow":"high_price"
+                            },
+                            "exit":{
+                                "subject":"define_3",
+                                "subject_is_higherhigh_or_lowerhigh":"high_price",
+                                "subject_is_lowerlow_or_higherlow":"low_price"
+                            },
+                            "target":{
+                                "subject":"",
+                                "subject_is_higherhigh_or_lowerhigh":"high_price",
+                                "subject_is_lowerlow_or_higherlow":"low_price"
+                            }
+                        }
+                    },
+                    "entry_4": {
+                        "new_filename": "STRUCTURAL-LIQUIDITY-MAIN2",
+                        "enable_entry_poi_confirmation": true,
+                        "poi_confirmation_timeframes": {"4h":["1h","30m","15m"],"1h":["30m","15m"]},
+                        "number_candles": "define_candle",
+                        "process_receiver_files": "yes",
+                        "identify_definitions": {
+                            "define_1": {
+                                "type": "swing_candle"
+                            },
+                            "define_2": {
+                                "type": "define_1_type_opposite",
+                                "condition": "behind_define_1"
+                            },
+                            "define_3": {
+                                "type": "define_2_type_opposite",
+                                "condition": "beyond_define_1",
+                                "minimum_collectivebeyondcandles": 4,
+                                "enable_drawing": true,
+                                "tool": "horizontal_line",
+                                "text": "liquidity Zone"
+                            },
+                            "define_4": {
+                                "type": "define_3_type_opposite",
+                                "condition": "beyond_define_2",
+                                "minimum_collectivebeyondcandles": null,
+                                "enable_drawing": true,
+                                "tool": "dashed_horizontal_line",
+                                "text": "MSS"
                             },
                             "define_5": {
                                 "type": "define_4_type_opposite",
@@ -117,130 +554,244 @@
                             }
                         }
                     }
-                },
-                "apprehend_higherhighsandlowerlows_2":{
+                }
+            },
+            "entries_poi_confirmation_condition": {
+                "apprehend_swing_points":{
                     "entry_1": {
-                        "new_filename": "DOUBLE-LEVELS",
+                        "new_filename": "STRUCTURAL-LIQUIDITY-1",
+                        "enable_entry_poi_confirmation": true,
+                        "poi_confirmation_timeframes": {},
                         "number_candles": "define_candle",
                         "process_receiver_files": "yes",
                         "identify_definitions": {
                             "define_1": {
-                                "type": "swing_candle"
+                                "type": "swing_candle",
+                                "enable_drawing": true,
+                                "tool": "horizontal_line",
+                                "text": "BOS"
                             },
                             "define_2": {
-                                "type": "define_1_type_identical",
-                                "condition": "behind_define_1"
+                                "type": "define_1_type_opposite",
+                                "condition": "behind_define_1",
+                                "enable_drawing": true,
+                                "tool": "horizontal_line",
+                                "text": "BOS"
                             }
                         },
                         "point_of_interest": {
                             "drawing_tool":"box",
                             "from_subject":"define_1",
                             "after_subject":"define_2",
-                            "subject_is_higherhigh_or_lowerhigh":"low_price",
-                            "subject_is_lowerlow_or_higherlow":"high_price",
-                            "restrict_definitions_mitigation":"define_2, define_3",
-                            "restrict_swing_mitigation_between_definitions":"define_1_define_2",
-                            "multiple_selection":"define_3_non_extreme"
+                            "subject_is_swinghigh_or_lowerhigh":"low_price",
+                            "subject_is_swinglow_or_higherlow":"high_price",
+                            "restrict_definitions_mitigation":"",
+                            "restrict_swing_mitigation_between_definitions":"",
+                            "multiple_selection":"define_1_extreme"
                         },
                         "record_prices": {
                             "risk_reward": 3,
                             "order_type":{
-                                "subject_is_higherhigh_or_lowerhigh":"sell_limit",
-                                "subject_is_lowerlow_or_higherlow":"buy_limit"
+                                "subject_is_swinghigh_or_lowerhigh":"sell_limit",
+                                "subject_is_swinglow_or_higherlow":"buy_limit"
                             },
                             "entry":{
                                 "subject":"define_1",
-                                "subject_is_higherhigh_or_lowerhigh":"low_price",
-                                "subject_is_lowerlow_or_higherlow":"high_price"
+                                "subject_is_swinghigh_or_lowerhigh":"low_price",
+                                "subject_is_swinglow_or_higherlow":"high_price"
                             },
                             "exit":{
                                 "subject":"define_1",
-                                "subject_is_higherhigh_or_lowerhigh":"high_price",
-                                "subject_is_lowerlow_or_higherlow":"low_price"
+                                "subject_is_swinghigh_or_lowerhigh":"high_price",
+                                "subject_is_swinglow_or_higherlow":"low_price"
                             },
                             "target":{
                                 "subject":"",
-                                "subject_is_higherhigh_or_lowerhigh":"high_price",
-                                "subject_is_lowerlow_or_higherlow":"low_price"
+                                "subject_is_swinghigh_or_lowerhigh":"high_price",
+                                "subject_is_swinglow_or_higherlow":"low_price"
+                            }
+                        }
+                    },
+                    "entry_2": {
+                        "new_filename": "STRUCTURAL-LIQUIDITY-2",
+                        "enable_entry_poi_confirmation": true,
+                        "poi_confirmation_timeframes": {},
+                        "number_candles": "define_candle",
+                        "process_receiver_files": "yes",
+                        "identify_definitions": {
+                            "define_1": {
+                                "type": "swing_candle",
+                                "enable_drawing": true,
+                                "tool": "horizontal_line",
+                                "text": "BOS"
+                            },
+                            "define_2": {
+                                "type": "define_1_type_opposite",
+                                "condition": "behind_define_1",
+                                "enable_drawing": true,
+                                "tool": "horizontal_line",
+                                "text": "BOS"
+                            },
+                            "define_3": {
+                                "type": "define_2_type_opposite",
+                                "condition": "behind_define_1",
+                                "enable_drawing": true,
+                                "tool": "dashed_horizontal_line",
+                                "text": "BOS"
+                            }
+                        },
+                        "point_of_interest": {
+                            "drawing_tool":"box",
+                            "from_subject":"define_3",
+                            "after_subject":"define_2_liquidity",
+                            "subject_is_swinghigh_or_lowerhigh":"low_price",
+                            "subject_is_swinglow_or_higherlow":"high_price",
+                            "restrict_definitions_mitigation":"",
+                            "restrict_swing_mitigation_between_definitions":"",
+                            "multiple_selection":"define_3_extreme"
+                        },
+                        "record_prices": {
+                            "risk_reward": 3,
+                            "order_type":{
+                                "subject_is_swinghigh_or_lowerhigh":"sell_limit",
+                                "subject_is_swinglow_or_higherlow":"buy_limit"
+                            },
+                            "entry":{
+                                "subject":"define_1",
+                                "subject_is_swinghigh_or_lowerhigh":"low_price",
+                                "subject_is_swinglow_or_higherlow":"high_price"
+                            },
+                            "exit":{
+                                "subject":"define_1",
+                                "subject_is_swinghigh_or_lowerhigh":"high_price",
+                                "subject_is_swinglow_or_higherlow":"low_price"
+                            },
+                            "target":{
+                                "subject":"",
+                                "subject_is_swinghigh_or_lowerhigh":"high_price",
+                                "subject_is_swinglow_or_higherlow":"low_price"
+                            }
+                        }
+                    },
+                    "entry_3": {
+                        "new_filename": "STRUCTURAL-LIQUIDITY-MAIN1",
+                        "enable_entry_poi_confirmation": true,
+                        "poi_confirmation_timeframes": {},
+                        "number_candles": "define_candle",
+                        "process_receiver_files": "yes",
+                        "identify_definitions": {
+                            "define_1": {
+                                "type": "swing_candle",
+                                "enable_drawing": true,
+                                "tool": "horizontal_line",
+                                "text": "BOS"
+                            },
+                            "define_2": {
+                                "type": "define_1_type_opposite",
+                                "condition": "behind_define_1",
+                                "enable_drawing": true,
+                                "tool": "horizontal_line",
+                                "text": "BOS"
+                            }
+                        },
+                        "point_of_interest": {
+                            "drawing_tool":"box",
+                            "from_subject":"define_1",
+                            "after_subject":"define_2",
+                            "subject_is_swinghigh_or_lowerhigh":"low_price",
+                            "subject_is_swinglow_or_higherlow":"high_price",
+                            "restrict_definitions_mitigation":"",
+                            "restrict_swing_mitigation_between_definitions":"",
+                            "multiple_selection":"define_1_extreme"
+                        },
+                        "record_prices": {
+                            "risk_reward": 3,
+                            "order_type":{
+                                "subject_is_swinghigh_or_lowerhigh":"sell_limit",
+                                "subject_is_swinglow_or_higherlow":"buy_limit"
+                            },
+                            "entry":{
+                                "subject":"define_1",
+                                "subject_is_swinghigh_or_lowerhigh":"low_price",
+                                "subject_is_swinglow_or_higherlow":"high_price"
+                            },
+                            "exit":{
+                                "subject":"define_1",
+                                "subject_is_swinghigh_or_lowerhigh":"high_price",
+                                "subject_is_swinglow_or_higherlow":"low_price"
+                            },
+                            "target":{
+                                "subject":"",
+                                "subject_is_swinghigh_or_lowerhigh":"high_price",
+                                "subject_is_swinglow_or_higherlow":"low_price"
+                            }
+                        }
+                    },
+                    "entry_4": {
+                        "new_filename": "STRUCTURAL-LIQUIDITY-MAIN2",
+                        "enable_entry_poi_confirmation": true,
+                        "poi_confirmation_timeframes": {},
+                        "number_candles": "define_candle",
+                        "process_receiver_files": "yes",
+                        "identify_definitions": {
+                            "define_1": {
+                                "type": "swing_candle",
+                                "enable_drawing": true,
+                                "tool": "horizontal_line",
+                                "text": "BOS"
+                            },
+                            "define_2": {
+                                "type": "define_1_type_opposite",
+                                "condition": "behind_define_1",
+                                "enable_drawing": true,
+                                "tool": "horizontal_line",
+                                "text": "BOS"
+                            },
+                            "define_3": {
+                                "type": "define_2_type_opposite",
+                                "condition": "behind_define_1",
+                                "enable_drawing": true,
+                                "tool": "dashed_horizontal_line",
+                                "text": "BOS"
+                            }
+                        },
+                        "point_of_interest": {
+                            "drawing_tool":"box",
+                            "from_subject":"define_3",
+                            "after_subject":"define_2_liquidity",
+                            "subject_is_swinghigh_or_lowerhigh":"low_price",
+                            "subject_is_swinglow_or_higherlow":"high_price",
+                            "restrict_definitions_mitigation":"",
+                            "restrict_swing_mitigation_between_definitions":"",
+                            "multiple_selection":"define_3_extreme"
+                        },
+                        "record_prices": {
+                            "risk_reward": 3,
+                            "order_type":{
+                                "subject_is_swinghigh_or_lowerhigh":"sell_limit",
+                                "subject_is_swinglow_or_higherlow":"buy_limit"
+                            },
+                            "entry":{
+                                "subject":"define_1",
+                                "subject_is_swinghigh_or_lowerhigh":"low_price",
+                                "subject_is_swinglow_or_higherlow":"high_price"
+                            },
+                            "exit":{
+                                "subject":"define_1",
+                                "subject_is_swinghigh_or_lowerhigh":"high_price",
+                                "subject_is_swinglow_or_higherlow":"low_price"
+                            },
+                            "target":{
+                                "subject":"",
+                                "subject_is_swinghigh_or_lowerhigh":"high_price",
+                                "subject_is_swinglow_or_higherlow":"low_price"
                             }
                         }
                     }
                 }
             },
-            "liquidity_candle": {
-                "apprehend_higherhighsandlowerlows":{
-                    "number_candles":"define_candle",
-                        "liquidity_apprentice_candle":{
-                            "swing_types":{
-                                "swing_type_lower_low":"low_price",
-                                "swing_type_lower_low_text":"",
-                                "swing_type_higher_high":"high_price",
-                                "swing_type_higher_high_text":"",                    
-                                "label_at": {
-                                    "swing_type_lower_low_marker": "",
-                                    "swing_type_higher_high_marker": ""
-                                }
-                            }
-                        },
-                        "liquidity_sweeper_candle":{                   
-                            "label_at": {
-                                "lower_low_liquidity_candle_marker": "",
-                                "higher_high_liquidity_candle_marker": "",
-                                "lower_low_liquidity_candle_text": "",
-                                "higher_high_liquidity_candle_text": ""
-                            }
-                        }
-                },
-                "apprehend_higherhighsandlowerlows_2":{
-                    "number_candles":"define_candle",
-                        "liquidity_apprentice_candle":{
-                            "swing_types":{
-                                "swing_type_lower_low":"low_price",
-                                "swing_type_lower_low_text":"",
-                                "swing_type_higher_high":"high_price",
-                                "swing_type_higher_high_text":"",                    
-                                "label_at": {
-                                    "swing_type_lower_low_marker": "",
-                                    "swing_type_higher_high_marker": ""
-                                }
-                            }
-                        },
-                        "liquidity_sweeper_candle":{                   
-                            "label_at": {
-                                "lower_low_liquidity_candle_marker": "",
-                                "higher_high_liquidity_candle_marker": "",
-                                "lower_low_liquidity_candle_text": "",
-                                "higher_high_liquidity_candle_text": ""
-                            }
-                        }
-                }
-            },
-            "higherhighsandlowerlows_2": {
-                "BARS": 301,
-                "filename":"parentswing.json",
-                "read_candles_from":"new_old",
-                "number_candles":"define_candle",
-                "timeframes_relation":"default",
-                "NEIGHBOR_LEFT": 14,
-                "NEIGHBOR_RIGHT": 1,
-                "label":{
-                    "higherhighs_text": "HH",
-                    "lowerlows_text": "LL",
-                    "directional_bias_text": "",
-                    "label_at": {
-                        "lower_lows":"low",
-                        "lower_lows_color":"green",
-                        "lower_lows_marker": "doublearrows",
-                        "lower_lows_contourmaker_marker": "",
-                        "lower_lows_directional_bias_marker": "",
-                        "higher_highs":"high",
-                        "higher_highs_color":"red",
-                        "higher_highs_marker": "doublearrows"
-                    }
-                }
-            },
-            "higherhighsandlowerlows": {
-                "BARS": 301,
+            "swing_points": {
+                "BARS": 500,
                 "filename":"parentswing.json",
                 "read_candles_from":"new_old",
                 "number_candles":"define_candle",
@@ -248,24 +799,24 @@
                 "NEIGHBOR_LEFT": 14,
                 "NEIGHBOR_RIGHT": 14,
                 "label":{
-                    "higherhighs_text": "HH",
-                    "lowerlows_text": "LL",
+                    "swinghighs_text": "HH",
+                    "swinglows_text": "LL",
                     "directional_bias_text": "",
                     "label_at": {
-                        "lower_lows":"low",
-                        "lower_lows_color":"green",
-                        "lower_lows_marker": "doublearrows",
-                        "lower_lows_contourmaker_marker": "",
-                        "lower_lows_directional_bias_marker": "",
-                        "higher_highs":"high",
-                        "higher_highs_color":"red",
-                        "higher_highs_marker": "doublearrows"
+                        "swing_lows":"low",
+                        "swing_lows_color":"green",
+                        "swing_lows_marker": "doublearrows",
+                        "swing_lows_contourmaker_marker": "",
+                        "swing_lows_directional_bias_marker": "",
+                        "swing_highs":"high",
+                        "swing_highs_color":"red",
+                        "swing_highs_marker": "doublearrows"
                     }
                 }
             },
             "fvg": {
                 "filename":"fvg.json",
-                "BARS": 301,
+                "BARS": 500,
                 "NEIGHBOR_LEFT": 14,
                 "NEIGHBOR_RIGHT": 14,
                 "read_candles_from":"new_old",
@@ -292,48 +843,6 @@
                         "bearish":"high",
                         "bearish_color":"red",
                         "bearish_marker": "arrow"
-                    }
-                }
-            },
-            "directional_bias_candles": {
-                "apprehend_": {
-                    "target":"contourmaker",          
-                    "label":{
-                        "directional_bias_candles_text": "",
-                        "label_at": {
-                            "upward_directional_bias": "high",
-                            "downward_directional_bias": "high",
-                            "upward_directional_bias_marker": "dot",
-                            "downward_directional_bias_marker": "dot"
-                        }
-                    }
-                },
-                "apprehend_(directional_bias_candles)": {       
-                    "label":{
-                        "directional_bias_candles_text": "",
-                        "label_at": {
-                            "upward_directional_bias": "high",
-                            "downward_directional_bias": "high",
-                            "upward_directional_bias_marker": "pentagon",
-                            "downward_directional_bias_marker": "pentagon"
-                        }
-                    }
-                }
-            },
-            "timeframes_communication": {
-                "apprehend_": {
-                    "number_candles":"define_candle",
-                    "timeframe_sender":"4h, 1h",
-                    "timeframe_receiver":"15m, 5m",
-                    "target":"contourmaker, directional_bias, next_bias",          
-                    "label":{
-                        "directional_bias_candles_text": "",
-                        "label_at": {
-                            "upward_directional_bias": "high",
-                            "downward_directional_bias": "high",
-                            "upward_directional_bias_marker": "dot",
-                            "downward_directional_bias_marker": "dot"
-                        }
                     }
                 }
             }
