@@ -1,0 +1,221 @@
+{
+    "selected_risk_reward": [1],
+    "symbols_dictionary": {
+        "xxxjpy": [],
+        "xxxusd": ["GBPUSD"],
+        "xxxaud": [],
+        "xxxnzd": [],
+        "usdxxx": [],
+        "xxxchf": [],
+        "xxxcad": [],
+        "xxxbasket": [],
+        "indices": [],
+        "metals": [],
+        "energies": [],
+        "synthetics": []
+    },
+    "grid_prices_setup": {
+        "bid_prices_order_type":"buy_stop",
+        "ask_prices_order_type":"sell_stop"
+    },
+    "settings": {
+        "enable_auto_trading": true,
+        "place_grid_trades": true,
+        "enable_breakeven": true,
+        "breakeven_dictionary": [
+            {
+                "reward": 0.5,
+                "breakeven_at_reward": 0.01
+            },
+            {
+                "reward": 1,
+                "breakeven_at_reward": 0.5
+            },
+            {
+                "reward": 1.8,
+                "breakeven_at_reward": 1
+            },
+            {
+                "reward": 2,
+                "breakeven_at_reward": 1
+            },
+            {
+                "reward": 2.8,
+                "breakeven_at_reward": 1.2
+            },
+            {
+                "reward": 3,
+                "breakeven_at_reward": 1.5
+            },
+            {
+                "reward": 3.8,
+                "breakeven_at_reward": 1.7
+            },
+            {
+                "reward": 4,
+                "breakeven_at_reward": 2
+            },
+            {
+                "reward": 4.8,
+                "breakeven_at_reward": 2.2
+            },
+            {
+                "reward": 5,
+                "breakeven_at_reward": 2.5
+            },
+            {
+                "reward": 5.8,
+                "breakeven_at_reward": 2.8
+            },
+            {
+                "reward": 6,
+                "breakeven_at_reward": 3
+            },
+            {
+                "reward": 7,
+                "breakeven_at_reward": 3.5
+            },
+            {
+                "reward": 7.8,
+                "breakeven_at_reward": 3.8
+            },
+            {
+                "reward": 8,
+                "breakeven_at_reward": 4
+            },
+            {
+                "reward": 8.8,
+                "breakeven_at_reward": 4.2
+            },
+            {
+                "reward": 9,
+                "breakeven_at_reward": 4.5
+            },
+            {
+                "reward": 10,
+                "breakeven_at_reward": 5
+            }
+        ],
+        "strategy_timeframe": "15m",
+        "restrict_order_from_timeframe": "1m, 5m",
+        "default_price": true,
+        "risk_reward_correction": true,
+        "opposite_order_restriction": false,
+        "enable_orders_configuration": false,
+        "enable_liquidator_configuration": false,
+        "enable_order_type_conversion": false,
+        "enable_martingale": true,
+        "maximum_martingale_lookback": 3,
+        "martingale_for_position_order_scale": true,
+        "martingale_pre_scaling": true,
+        "martingale_loss_recovery_adder_percentage": "10%",
+        "enable_single_position_and_pending": true,
+        "enable_default_account_balance_management": true,
+        "enable_maximum_account_balance_management": false
+    },
+    "martingale_risk_management": {
+        "1000-90000.99_risk": 3000
+    },
+    "account_balance_default_risk_management": {
+        "1000-90000.99_risk": 50,
+        "0.50-2.99_risk": 0.5,
+        "3-4.99_risk": 1,
+        "5-9.99_risk": 1,
+        "10-99.99_risk": 3,
+        "100-199.99_risk": 6,
+        "110-119.99_risk": 11,
+        "120-129.99_risk": 12,
+        "130-139.99_risk": 13,
+        "140-149.99_risk": 14,
+        "150-159.99_risk": 15,
+        "160-169.99_risk": 16,
+        "170-179.99_risk": 17,
+        "180-189.99_risk": 18,
+        "190-199.99_risk": 19,
+        "200-209.99_risk": 20,
+        "210-219.99_risk": 21,
+        "220-229.99_risk": 22,
+        "230-239.99_risk": 23,
+        "240-249.99_risk": 24,
+        "250-259.99_risk": 25,
+        "260-269.99_risk": 26,
+        "270-279.99_risk": 27,
+        "280-289.99_risk": 28,
+        "290-299.99_risk": 29,
+        "300-309.99_risk": 30,
+        "310-319.99_risk": 31,
+        "320-329.99_risk": 32,
+        "330-339.99_risk": 33,
+        "340-349.99_risk": 34,
+        "350-359.99_risk": 35,
+        "360-369.99_risk": 36,
+        "370-379.99_risk": 37,
+        "380-389.99_risk": 38,
+        "390-399.99_risk": 39,
+        "400-409.99_risk": 40,
+        "410-419.99_risk": 41,
+        "420-429.99_risk": 42,
+        "430-439.99_risk": 43,
+        "440-449.99_risk": 44,
+        "450-459.99_risk": 45,
+        "460-469.99_risk": 46,
+        "470-479.99_risk": 47,
+        "480-489.99_risk": 48,
+        "490-499.99_risk": 49,
+        "500-500.99_risk": 50,
+        "600-700.99_risk": 55,
+        "700-800.99_risk": 60,
+        "800-900.99_risk": 80
+    },
+    "account_balance_maximum_risk_management": {
+        "0.50-2.99_risk": 0.5,
+        "3-4.99_risk": 1,
+        "5-9.99_risk": 1,
+        "10-99.99_risk": 6,
+        "100-199.99_risk": 12,
+        "110-119.99_risk": 11,
+        "120-129.99_risk": 12,
+        "130-139.99_risk": 13,
+        "140-149.99_risk": 14,
+        "150-159.99_risk": 15,
+        "160-169.99_risk": 16,
+        "170-179.99_risk": 17,
+        "180-189.99_risk": 18,
+        "190-199.99_risk": 19,
+        "200-209.99_risk": 20,
+        "210-219.99_risk": 21,
+        "220-229.99_risk": 22,
+        "230-239.99_risk": 23,
+        "240-249.99_risk": 24,
+        "250-259.99_risk": 25,
+        "260-269.99_risk": 26,
+        "270-279.99_risk": 27,
+        "280-289.99_risk": 28,
+        "290-299.99_risk": 29,
+        "300-309.99_risk": 30,
+        "310-319.99_risk": 31,
+        "320-329.99_risk": 32,
+        "330-339.99_risk": 33,
+        "340-349.99_risk": 34,
+        "350-359.99_risk": 35,
+        "360-369.99_risk": 36,
+        "370-379.99_risk": 37,
+        "380-389.99_risk": 38,
+        "390-399.99_risk": 39,
+        "400-409.99_risk": 40,
+        "410-419.99_risk": 41,
+        "420-429.99_risk": 42,
+        "430-439.99_risk": 43,
+        "440-449.99_risk": 44,
+        "450-459.99_risk": 45,
+        "460-469.99_risk": 46,
+        "470-479.99_risk": 47,
+        "480-489.99_risk": 48,
+        "490-499.99_risk": 49,
+        "500-500.99_risk": 50,
+        "600-700.99_risk": 55,
+        "700-800.99_risk": 60,
+        "800-900.99_risk": 80,
+        "1000-90000.99_risk": 100
+    }
+}

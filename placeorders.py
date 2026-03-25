@@ -9657,19 +9657,21 @@ def place_signals_orders_accounts(inv_id=None):
 def manage_single_position_and_pending(inv_id=None):
     """
     Function: Manages positions and pending orders to ensure only one position exists PER SYMBOL
-    and only the closest opposite pending order remains PER SYMBOL.
+    and only the opposite pending order with entry price matching the position's SL price remains.
     
     If enable_single_position_and_pending is True:
     - For each symbol with a position:
-        - For a SELL position: Keeps only the closest BUY order (either LIMIT or STOP)
-        - For a BUY position: Keeps only the closest SELL order (either LIMIT or STOP)
+        - For a SELL position: Keeps only the BUY order with entry price EQUAL to the SELL position's SL price
+        - For a BUY position: Keeps only the SELL order with entry price EQUAL to the BUY position's SL price
         - Deletes all other pending orders for that symbol
-        - Closest is determined by distance to the position's ENTRY price, not current price
     
     - For each symbol WITHOUT a position but WITH pending orders:
-        - Keeps the closest BUY order and the closest SELL order (one of each type)
-        - Closest is determined by distance to the CURRENT price
-        - Deletes all other pending orders for that symbol
+        - First, identify the closest BUY order to current price and closest SELL order to current price
+        - Then, check if these two orders have a valid SL relationship:
+          * BUY entry price equals SELL SL price, OR
+          * SELL entry price equals BUY SL price
+        - If valid SL relationship exists: keep these two orders, delete all others
+        - If no valid SL relationship: delete ALL pending orders
     
     Args:
         inv_id: Optional specific investor ID to process. If None, processes all investors.
@@ -9692,7 +9694,7 @@ def manage_single_position_and_pending(inv_id=None):
         "orders_deleted": 0,
         "errors": 0,
         "processing_success": False,
-        "upload_orders": True,  # Will be set to False ONLY if ANY symbol has valid position + opposite order
+        "upload_orders": True,  # Will be set to False ONLY if ANY symbol has valid SL match
         "symbol_status": {}  # Track per symbol status for debugging
     }
 
@@ -9732,7 +9734,7 @@ def manage_single_position_and_pending(inv_id=None):
                 print(f"  └─ ⏭️  Single position/pending management disabled in settings. Skipping.")
                 continue
             
-            print(f"  └─ ✅ Single position/pending management ENABLED (PER SYMBOL MODE)")
+            print(f"  └─ ✅ Single position/pending management ENABLED (SL PRICE MATCHING MODE)")
             
         except Exception as e:
             print(f"  └─ ❌ Failed to read config: {e}")
@@ -9852,7 +9854,7 @@ def manage_single_position_and_pending(inv_id=None):
             
             if has_position:
                 # --- CASE 1: Symbol HAS a position ---
-                print(f"      📍 Symbol has a position - managing based on POSITION ENTRY PRICE")
+                print(f"      📍 Symbol has a position - checking for opposite order with matching SL price")
                 
                 symbol_positions = positions_by_symbol[symbol]
                 
@@ -9872,106 +9874,68 @@ def manage_single_position_and_pending(inv_id=None):
                 print(f"      • Type: {position_type_str}")
                 print(f"      • Volume: {position.volume}")
                 print(f"      • Entry Price: {position.price_open}")
+                print(f"      • SL Price: {position.sl}")
                 print(f"      • Current Price: {position.price_current}")
                 print(f"      • Found {len(symbol_orders)} pending orders for {symbol}")
                 
-                # Define opposite order types based on position direction
-                opposite_orders = []
-                same_direction_orders = []
-                
-                if is_buy_position:
-                    # For BUY position, keep SELL orders (both LIMIT and STOP)
-                    for order in symbol_orders:
-                        if order.type in [mt5.ORDER_TYPE_SELL_LIMIT, mt5.ORDER_TYPE_SELL_STOP]:
-                            opposite_orders.append(order)
-                        else:
-                            same_direction_orders.append(order)
-                    print(f"      • Found {len(opposite_orders)} SELL orders (opposite to BUY position)")
-                    print(f"      • Found {len(same_direction_orders)} BUY orders (same direction)")
-                else:
-                    # For SELL position, keep BUY orders (both LIMIT and STOP)
-                    for order in symbol_orders:
-                        if order.type in [mt5.ORDER_TYPE_BUY_LIMIT, mt5.ORDER_TYPE_BUY_STOP]:
-                            opposite_orders.append(order)
-                        else:
-                            same_direction_orders.append(order)
-                    print(f"      • Found {len(opposite_orders)} BUY orders (opposite to SELL position)")
-                    print(f"      • Found {len(same_direction_orders)} SELL orders (same direction)")
-                
-                # Delete same direction orders immediately
-                if same_direction_orders:
-                    print(f"      🗑️  Deleting {len(same_direction_orders)} same-direction orders...")
-                    for order in same_direction_orders:
-                        order_type_name = "UNKNOWN"
-                        if order.type == mt5.ORDER_TYPE_BUY_LIMIT:
-                            order_type_name = "BUY LIMIT"
-                        elif order.type == mt5.ORDER_TYPE_SELL_LIMIT:
-                            order_type_name = "SELL LIMIT"
-                        elif order.type == mt5.ORDER_TYPE_BUY_STOP:
-                            order_type_name = "BUY STOP"
-                        elif order.type == mt5.ORDER_TYPE_SELL_STOP:
-                            order_type_name = "SELL STOP"
-                        
-                        print(f"        • Deleting order #{order.ticket} ({order_type_name} @ {order.price_open})...")
-                        delete_request = {
-                            "action": mt5.TRADE_ACTION_REMOVE,
-                            "order": order.ticket,
-                        }
-                        result = mt5.order_send(delete_request)
-                        if result and result.retcode == mt5.TRADE_RETCODE_DONE:
-                            symbol_stats["orders_deleted"] += 1
-                            stats["orders_deleted"] += 1
-                            symbol_stats["action_taken"] = True
-                            print(f"          ✅ Deleted successfully")
-                        else:
-                            stats["errors"] += 1
-                            error_msg = result.comment if result else f"Error code: {result.retcode if result else 'Unknown'}"
-                            print(f"          ❌ Deletion failed: {error_msg}")
-                
-                if not opposite_orders:
-                    print(f"      📊 No opposite orders found for {symbol}. Deleting all pending orders for this symbol.")
+                # Check if position has SL
+                if position.sl is None or position.sl == 0:
+                    print(f"      ⚠️  Position has no SL price set. Deleting ALL pending orders.")
+                    # Delete all pending orders for this symbol
+                    orders_to_delete = symbol_orders.copy()
                     symbol_stats["has_valid_pair"] = False
-                    # Delete all pending orders for this symbol since no opposite orders exist
-                    orders_to_delete = [o for o in symbol_orders if o.ticket not in [order.ticket for order in same_direction_orders]]
                 else:
-                    # Find the closest opposite order to the POSITION ENTRY PRICE
-                    entry_price = position.price_open
+                    # Define opposite order type based on position direction
+                    opposite_order_types = []
+                    target_sl_price = position.sl
                     
-                    # Calculate distance from entry price for each opposite order
-                    closest_order = min(opposite_orders, key=lambda o: abs(o.price_open - entry_price))
-                    distance = abs(closest_order.price_open - entry_price)
+                    if is_buy_position:
+                        # For BUY position, look for SELL orders with entry price EQUAL to BUY SL
+                        opposite_order_types = [mt5.ORDER_TYPE_SELL_LIMIT, mt5.ORDER_TYPE_SELL_STOP]
+                        print(f"      • Looking for SELL order with entry price = BUY SL ({target_sl_price})")
+                    else:
+                        # For SELL position, look for BUY orders with entry price EQUAL to SELL SL
+                        opposite_order_types = [mt5.ORDER_TYPE_BUY_LIMIT, mt5.ORDER_TYPE_BUY_STOP]
+                        print(f"      • Looking for BUY order with entry price = SELL SL ({target_sl_price})")
                     
-                    order_type_name = "UNKNOWN"
-                    if closest_order.type == mt5.ORDER_TYPE_BUY_LIMIT:
-                        order_type_name = "BUY LIMIT"
-                    elif closest_order.type == mt5.ORDER_TYPE_SELL_LIMIT:
-                        order_type_name = "SELL LIMIT"
-                    elif closest_order.type == mt5.ORDER_TYPE_BUY_STOP:
-                        order_type_name = "BUY STOP"
-                    elif closest_order.type == mt5.ORDER_TYPE_SELL_STOP:
-                        order_type_name = "SELL STOP"
+                    # Find opposite orders with entry price exactly matching SL
+                    matching_orders = []
+                    other_orders = []
                     
-                    print(f"      🎯 Closest opposite order to ENTRY PRICE ({entry_price}):")
-                    print(f"      • Ticket: {closest_order.ticket}")
-                    print(f"      • Type: {order_type_name}")
-                    print(f"      • Price: {closest_order.price_open}")
-                    print(f"      • Distance from entry price: {distance:.5f}")
+                    for order in symbol_orders:
+                        if order.type in opposite_order_types:
+                            if abs(order.price_open - target_sl_price) < 0.00001:  # Float comparison with tolerance
+                                matching_orders.append(order)
+                                print(f"      ✅ Found matching order #{order.ticket} with entry price {order.price_open} = SL {target_sl_price}")
+                            else:
+                                other_orders.append(order)
+                                print(f"      ❌ Order #{order.ticket} entry price {order.price_open} does NOT match SL {target_sl_price}")
+                        else:
+                            # Orders in same direction or other types
+                            other_orders.append(order)
                     
-                    # Keep this order, delete all others
-                    orders_to_keep = [closest_order]
-                    orders_to_delete = [o for o in opposite_orders if o.ticket != closest_order.ticket]
-                    
-                    # This symbol has a valid position + opposite order pair
-                    symbol_stats["has_valid_pair"] = True
-                    investor_has_valid_pair = True
-                    
-                    # Update kept orders count
-                    symbol_stats["orders_kept"] = len(orders_to_keep)
-                    stats["orders_kept"] += len(orders_to_keep)
+                    # Keep only the first matching order (if any), delete all others
+                    if matching_orders:
+                        # Keep the first matching order
+                        order_to_keep = matching_orders[0]
+                        orders_to_keep = [order_to_keep]
+                        orders_to_delete = matching_orders[1:] + other_orders
+                        
+                        order_type_name = "SELL" if is_buy_position else "BUY"
+                        print(f"      🎯 Keeping opposite {order_type_name} order #{order_to_keep.ticket} with entry price matching SL")
+                        symbol_stats["has_valid_pair"] = True
+                        investor_has_valid_pair = True
+                        symbol_stats["orders_kept"] = len(orders_to_keep)
+                        stats["orders_kept"] += len(orders_to_keep)
+                    else:
+                        # No matching order found
+                        orders_to_delete = symbol_orders.copy()
+                        print(f"      ❌ No opposite order found with entry price matching SL ({target_sl_price})")
+                        symbol_stats["has_valid_pair"] = False
                 
-                # Delete orders that are not the closest opposite order
+                # Delete all non-matching orders
                 if orders_to_delete:
-                    print(f"      🗑️  Deleting {len(orders_to_delete)} opposite orders...")
+                    print(f"      🗑️  Deleting {len(orders_to_delete)} order(s)...")
                     symbol_stats["action_taken"] = True
                     
                     for order in orders_to_delete:
@@ -10005,13 +9969,26 @@ def manage_single_position_and_pending(inv_id=None):
             
             else:
                 # --- CASE 2: Symbol has NO position, only pending orders ---
-                print(f"      📍 Symbol has NO position - managing based on CURRENT PRICE")
+                print(f"      📍 Symbol has NO position - finding closest BUY/SELL orders to current price")
                 
                 if not current_price:
-                    print(f"      ⚠️  Cannot get current price for {symbol}. Skipping management for this symbol.")
+                    print(f"      ⚠️  Cannot get current price for {symbol}. Deleting all pending orders.")
+                    orders_to_delete = symbol_orders.copy()
                     symbol_stats["has_valid_pair"] = False
-                    symbol_stats["action_taken"] = False
-                    stats["symbol_status"][symbol] = "NO_PRICE_DATA"
+                    symbol_stats["orders_deleted"] = len(orders_to_delete)
+                    stats["orders_deleted"] += len(orders_to_delete)
+                    symbol_stats["action_taken"] = True if orders_to_delete else False
+                    
+                    # Delete all orders
+                    for order in orders_to_delete:
+                        delete_request = {
+                            "action": mt5.TRADE_ACTION_REMOVE,
+                            "order": order.ticket,
+                        }
+                        result = mt5.order_send(delete_request)
+                        if result and result.retcode != mt5.TRADE_RETCODE_DONE:
+                            stats["errors"] += 1
+                    
                     symbol_results.append(symbol_stats)
                     stats["symbols_processed"] += 1
                     continue
@@ -10032,59 +10009,73 @@ def manage_single_position_and_pending(inv_id=None):
                 print(f"      • Found {len(buy_orders)} BUY orders")
                 print(f"      • Found {len(sell_orders)} SELL orders")
                 
-                orders_to_keep = []
-                orders_to_delete = []
-                
-                # Find the closest BUY order to current price (if any)
+                # STEP 1: Find closest BUY order to current price
+                closest_buy = None
                 if buy_orders:
                     closest_buy = min(buy_orders, key=lambda o: abs(o.price_open - current_price))
                     buy_distance = abs(closest_buy.price_open - current_price)
-                    orders_to_keep.append(closest_buy)
                     print(f"      🎯 Closest BUY order to CURRENT PRICE ({current_price}):")
                     print(f"      • Ticket: {closest_buy.ticket}")
                     print(f"      • Type: {'BUY LIMIT' if closest_buy.type == mt5.ORDER_TYPE_BUY_LIMIT else 'BUY STOP'}")
-                    print(f"      • Price: {closest_buy.price_open}")
-                    print(f"      • Distance from current price: {buy_distance:.5f}")
-                    
-                    # Add all other BUY orders to delete
-                    for order in buy_orders:
-                        if order.ticket != closest_buy.ticket:
-                            orders_to_delete.append(order)
+                    print(f"      • Entry: {closest_buy.price_open}")
+                    print(f"      • SL: {closest_buy.sl}")
+                    print(f"      • Distance: {buy_distance:.5f}")
                 else:
                     print(f"      ℹ️  No BUY orders found")
                 
-                # Find the closest SELL order to current price (if any)
+                # STEP 2: Find closest SELL order to current price
+                closest_sell = None
                 if sell_orders:
                     closest_sell = min(sell_orders, key=lambda o: abs(o.price_open - current_price))
                     sell_distance = abs(closest_sell.price_open - current_price)
-                    orders_to_keep.append(closest_sell)
                     print(f"      🎯 Closest SELL order to CURRENT PRICE ({current_price}):")
                     print(f"      • Ticket: {closest_sell.ticket}")
                     print(f"      • Type: {'SELL LIMIT' if closest_sell.type == mt5.ORDER_TYPE_SELL_LIMIT else 'SELL STOP'}")
-                    print(f"      • Price: {closest_sell.price_open}")
-                    print(f"      • Distance from current price: {sell_distance:.5f}")
-                    
-                    # Add all other SELL orders to delete
-                    for order in sell_orders:
-                        if order.ticket != closest_sell.ticket:
-                            orders_to_delete.append(order)
+                    print(f"      • Entry: {closest_sell.price_open}")
+                    print(f"      • SL: {closest_sell.sl}")
+                    print(f"      • Distance: {sell_distance:.5f}")
                 else:
                     print(f"      ℹ️  No SELL orders found")
                 
-                # Update counts
-                symbol_stats["orders_kept"] = len(orders_to_keep)
-                stats["orders_kept"] += len(orders_to_keep)
-                
-                # Mark as having valid pair if both BUY and SELL orders exist and we kept one of each
-                if buy_orders and sell_orders:
-                    symbol_stats["has_valid_pair"] = True
-                    investor_has_valid_pair = True  # Also affects upload_orders flag
-                    print(f"      ✅ Symbol has both BUY and SELL orders - valid pair created")
+                # STEP 3: Check if we have both a BUY and SELL order
+                if closest_buy and closest_sell:
+                    # Check for valid SL relationship
+                    valid_sl_match = False
+                    
+                    # Check if BUY entry equals SELL SL
+                    if closest_buy.sl is not None and abs(closest_buy.sl - closest_sell.price_open) < 0.00001:
+                        valid_sl_match = True
+                        print(f"      ✅ Valid SL match: BUY SL ({closest_buy.sl}) = SELL entry ({closest_sell.price_open})")
+                    
+                    # Check if SELL entry equals BUY SL
+                    elif closest_sell.sl is not None and abs(closest_sell.sl - closest_buy.price_open) < 0.00001:
+                        valid_sl_match = True
+                        print(f"      ✅ Valid SL match: SELL SL ({closest_sell.sl}) = BUY entry ({closest_buy.price_open})")
+                    
+                    if valid_sl_match:
+                        # Keep both closest orders, delete all others
+                        orders_to_keep = [closest_buy, closest_sell]
+                        orders_to_delete = [o for o in symbol_orders if o.ticket not in [closest_buy.ticket, closest_sell.ticket]]
+                        
+                        print(f"      🎯 Keeping valid BUY/SELL pair (closest to current price with SL match)")
+                        symbol_stats["has_valid_pair"] = True
+                        investor_has_valid_pair = True
+                        symbol_stats["orders_kept"] = len(orders_to_keep)
+                        stats["orders_kept"] += len(orders_to_keep)
+                    else:
+                        # No valid SL relationship - delete ALL orders
+                        orders_to_delete = symbol_orders.copy()
+                        orders_to_keep = []
+                        print(f"      ❌ Closest orders do NOT have valid SL relationship - deleting ALL orders")
+                        symbol_stats["has_valid_pair"] = False
                 else:
+                    # Missing either BUY or SELL order - delete ALL orders
+                    orders_to_delete = symbol_orders.copy()
+                    orders_to_keep = []
+                    print(f"      ❌ Missing either BUY or SELL order - deleting ALL orders")
                     symbol_stats["has_valid_pair"] = False
-                    print(f"      ⚠️  Symbol missing either BUY or SELL orders - no valid pair")
                 
-                # Delete all orders not kept
+                # Delete orders
                 if orders_to_delete:
                     print(f"      🗑️  Deleting {len(orders_to_delete)} order(s)...")
                     symbol_stats["action_taken"] = True
@@ -10124,27 +10115,30 @@ def manage_single_position_and_pending(inv_id=None):
             # Display per-symbol summary
             print(f"      📊 {symbol} Summary:")
             print(f"      • Management Type: {symbol_stats['management_type']}")
-            print(f"      • Has valid pair: {'✅ YES' if symbol_stats['has_valid_pair'] else '❌ NO'}")
+            print(f"      • Has valid SL match: {'✅ YES' if symbol_stats['has_valid_pair'] else '❌ NO'}")
             print(f"      • Orders kept: {symbol_stats['orders_kept']}")
             print(f"      • Orders deleted: {symbol_stats['orders_deleted']}")
             
             # Store status
             if has_position:
-                stats["symbol_status"][symbol] = "VALID_PAIR" if symbol_stats["has_valid_pair"] else "NO_VALID_PAIR"
+                stats["symbol_status"][symbol] = "VALID_SL_MATCH" if symbol_stats["has_valid_pair"] else "NO_SL_MATCH"
             else:
-                stats["symbol_status"][symbol] = "NO_POSITION" + ("_VALID_PAIR" if symbol_stats["has_valid_pair"] else "_NO_VALID_PAIR")
+                if symbol_stats["has_valid_pair"]:
+                    stats["symbol_status"][symbol] = "VALID_PAIR_CLOSEST_WITH_SL_MATCH"
+                else:
+                    stats["symbol_status"][symbol] = "NO_VALID_PAIR_ALL_DELETED"
         
         # --- DETERMINE FINAL upload_orders FLAG ---
         # CRITICAL: upload_orders should be:
-        # - True if NO symbol has a valid pair (either with position OR with both BUY+SELL orders)
-        # - False if AT LEAST ONE symbol has a valid pair
+        # - True if NO symbol has a valid SL match
+        # - False if AT LEAST ONE symbol has a valid SL match
         
         if investor_has_valid_pair:
             stats["upload_orders"] = False
-            print(f"\n  └─ 🚩 upload_orders = False (At least one symbol has a valid pair - either position+opposite or both BUY+SELL orders)")
+            print(f"\n  └─ 🚩 upload_orders = False (At least one symbol has valid SL match)")
         else:
             stats["upload_orders"] = True
-            print(f"\n  └─ 🚩 upload_orders = True (No symbol has a valid pair)")
+            print(f"\n  └─ 🚩 upload_orders = True (No symbol has valid SL match)")
         
         stats["processing_success"] = True
         
@@ -10162,12 +10156,12 @@ def manage_single_position_and_pending(inv_id=None):
             print(f"      • Per-symbol breakdown:")
             for sym_result in symbol_results:
                 if sym_result['has_position']:
-                    status = "✅ VALID PAIR" if sym_result['has_valid_pair'] else "❌ NO VALID PAIR"
+                    status = "✅ VALID SL MATCH" if sym_result['has_valid_pair'] else "❌ NO SL MATCH"
                 else:
                     if sym_result['has_valid_pair']:
-                        status = "✅ VALID PAIR (BUY+SELL orders)"
+                        status = "✅ VALID PAIR (closest orders with SL match)"
                     else:
-                        status = "❌ NO VALID PAIR (missing BUY or SELL)"
+                        status = "❌ NO VALID PAIR (all orders deleted)"
                 print(f"        - {sym_result['symbol']}: {status} (kept: {sym_result['orders_kept']}, deleted: {sym_result['orders_deleted']})")
         
         if stats['errors'] > 0:
@@ -10201,7 +10195,8 @@ def manage_single_position_and_pending(inv_id=None):
     print(f"\n{'='*10} 🏁 SINGLE POSITION & PENDING ORDER MANAGEMENT COMPLETE {'='*10}\n")
     return stats
 
-def martingale(inv_id=None):
+def martingale_old(inv_id=None):
+
     """
     Function: Checks daily loss and martingale status for the day.
     
@@ -10214,6 +10209,7 @@ def martingale(inv_id=None):
     - Validates risk for one order using EXACT same method as check_pending_orders_risk()
     - Symbol-specific martingale tracking (each symbol tracked separately)
     - Loss recovery with percentage adder based on martingale_loss_recovery_adder_percentage
+    - Optionally syncs volume changes to existing pending orders if martingale_for_position_order_scale is enabled
     
     Args:
         inv_id: Optional specific investor ID to process. If None, processes all investors.
@@ -10233,6 +10229,7 @@ def martingale(inv_id=None):
         "maximum_martingale_lookback": 0,
         "martingale_maximum_risk": 0,
         "martingale_loss_recovery_adder_percentage": 0,
+        "martingale_for_position_order_scale": False,  # New tracking field
         "has_loss": False,
         "daily_loss": 0.0,
         "starting_balance": 0.0,
@@ -10243,9 +10240,11 @@ def martingale(inv_id=None):
         "symbols_with_loss": [],
         "symbol_analysis": {},  # Per-symbol analysis
         "signals_modified": False,
+        "pending_orders_modified": False,  # Track if pending orders were modified
         "risk_check_passed": False,
         "risk_exceeded": False,
-        "order_risk_validation": {}
+        "order_risk_validation": {},
+        "pending_order_sync_results": {}  # Track sync results per symbol
     }
 
     # Determine which investors to process
@@ -10279,6 +10278,7 @@ def martingale(inv_id=None):
             martingale_enabled = settings.get("enable_martingale", False)
             maximum_lookback = settings.get("maximum_martingale_lookback", 3)
             recovery_adder_str = settings.get("martingale_loss_recovery_adder_percentage", "0%")
+            martingale_for_position_order_scale = settings.get("martingale_for_position_order_scale", False)
             
             # Parse percentage (remove % sign and convert to float)
             recovery_adder_percentage = 0
@@ -10291,6 +10291,7 @@ def martingale(inv_id=None):
             stats["martingale_enabled"] = martingale_enabled
             stats["maximum_martingale_lookback"] = maximum_lookback
             stats["martingale_loss_recovery_adder_percentage"] = recovery_adder_percentage
+            stats["martingale_for_position_order_scale"] = martingale_for_position_order_scale
             
             if not martingale_enabled:
                 print(f"  └─ ⏭️  Martingale DISABLED in settings. Skipping.")
@@ -10300,6 +10301,7 @@ def martingale(inv_id=None):
             print(f"  └─ ✅ Martingale ENABLED")
             print(f"  └─ 🔢 Maximum Martingale Lookback: {maximum_lookback} losses")
             print(f"  └─ 📈 Loss Recovery Adder: {recovery_adder_percentage}%")
+            print(f"  └─ 🔄 Sync to Pending Orders: {'✅ ENABLED' if martingale_for_position_order_scale else '❌ DISABLED'}")
             
         except Exception as e:
             print(f"  └─ ❌ Failed to read config: {e}")
@@ -10711,6 +10713,18 @@ def martingale(inv_id=None):
                 
                 # Track modifications per symbol
                 modifications_made = []
+                pending_order_modifications = []  # Track pending order syncs
+                
+                # Get all pending orders if sync is enabled
+                pending_orders = []
+                if martingale_for_position_order_scale:
+                    print(f"\n      🔍 Fetching current pending orders from MT5...")
+                    pending_orders = mt5.orders_get()
+                    if pending_orders is None:
+                        print(f"      ⚠️  Could not fetch pending orders")
+                        pending_orders = []
+                    else:
+                        print(f"      • Found {len(pending_orders)} pending orders")
                 
                 # Process each symbol that needs recovery
                 for recovery_symbol in symbols_with_recovery_needed:
@@ -10734,6 +10748,9 @@ def martingale(inv_id=None):
                     sample_entry = None
                     sample_stop = None
                     sample_order_type = None
+                    order_category = None
+                    order_type_bid_ask = None  # 'bid' or 'ask'
+                    order_index = None
                     
                     for category_name, category_data in signals_data.get('categories', {}).items():
                         symbols_in_category = category_data.get('symbols', {})
@@ -10741,20 +10758,27 @@ def martingale(inv_id=None):
                         if recovery_symbol in symbols_in_category:
                             symbol_signals = symbols_in_category[recovery_symbol]
                             
-                            # Check for orders
+                            # Check for bid orders
                             if 'bid_orders' in symbol_signals and symbol_signals['bid_orders']:
                                 sample_order = symbol_signals['bid_orders'][0]
                                 sample_entry = sample_order.get('entry')
                                 sample_stop = sample_order.get('exit')
                                 sample_order_type = sample_order.get('order_type')
+                                order_category = category_name
+                                order_type_bid_ask = 'bid'
+                                order_index = 0
                                 symbol_orders_found = True
                                 break
                             
+                            # Check for ask orders
                             if 'ask_orders' in symbol_signals and symbol_signals['ask_orders']:
                                 sample_order = symbol_signals['ask_orders'][0]
                                 sample_entry = sample_order.get('entry')
                                 sample_stop = sample_order.get('exit')
                                 sample_order_type = sample_order.get('order_type')
+                                order_category = category_name
+                                order_type_bid_ask = 'ask'
+                                order_index = 0
                                 symbol_orders_found = True
                                 break
                     
@@ -10763,6 +10787,7 @@ def martingale(inv_id=None):
                         continue
                     
                     print(f"      📝 Found orders for {recovery_symbol}:")
+                    print(f"        • Category: {order_category}")
                     print(f"        • Order Type: {sample_order_type}")
                     print(f"        • Entry Price: {sample_entry}")
                     print(f"        • Stop Loss: {sample_stop}")
@@ -10926,7 +10951,7 @@ def martingale(inv_id=None):
                                 "new_volume": safe_volume
                             })
                         else:
-                            # Update orders for this specific symbol only
+                            # Update orders for this specific symbol only in signals.json
                             orders_modified = 0
                             
                             for category_name, category_data in signals_data.get('categories', {}).items():
@@ -10941,7 +10966,7 @@ def martingale(inv_id=None):
                                             if abs(old_volume - safe_volume) > 0.001:
                                                 order['volume'] = safe_volume
                                                 orders_modified += 1
-                                                print(f"        🔄 Modified {recovery_symbol} bid order: {old_volume} → {safe_volume} lots")
+                                                print(f"        🔄 Modified {recovery_symbol} bid order in signals.json: {old_volume} → {safe_volume} lots")
                                     
                                     if 'ask_orders' in symbol_signals:
                                         for order in symbol_signals['ask_orders']:
@@ -10949,7 +10974,7 @@ def martingale(inv_id=None):
                                             if abs(old_volume - safe_volume) > 0.001:
                                                 order['volume'] = safe_volume
                                                 orders_modified += 1
-                                                print(f"        🔄 Modified {recovery_symbol} ask order: {old_volume} → {safe_volume} lots")
+                                                print(f"        🔄 Modified {recovery_symbol} ask order in signals.json: {old_volume} → {safe_volume} lots")
                             
                             if orders_modified > 0:
                                 modifications_made.append({
@@ -10959,7 +10984,71 @@ def martingale(inv_id=None):
                                     "new_volume": safe_volume,
                                     "orders_modified": orders_modified
                                 })
-                                print(f"\n      ✅ Modified {orders_modified} orders for {recovery_symbol} to volume: {safe_volume} lots")
+                                print(f"\n      ✅ Modified {orders_modified} orders in signals.json for {recovery_symbol} to volume: {safe_volume} lots")
+                            
+                            # --- SYNC TO EXISTING PENDING ORDERS IF ENABLED ---
+                            if martingale_for_position_order_scale and pending_orders:
+                                print(f"\n      🔄 Syncing volume change to existing pending orders for {recovery_symbol}...")
+                                
+                                # Find pending orders for this symbol
+                                symbol_pending_orders = [order for order in pending_orders if order.symbol == recovery_symbol]
+                                
+                                if symbol_pending_orders:
+                                    print(f"      • Found {len(symbol_pending_orders)} pending orders for {recovery_symbol}")
+                                    
+                                    for pending_order in symbol_pending_orders:
+                                        order_ticket = pending_order.ticket
+                                        current_volume = pending_order.volume
+                                        
+                                        if abs(current_volume - safe_volume) < 0.001:
+                                            print(f"        • Order {order_ticket} already has correct volume: {current_volume} lots")
+                                            continue
+                                        
+                                        print(f"        • Modifying order {order_ticket}: {current_volume} → {safe_volume} lots")
+                                        
+                                        # Prepare order modification request
+                                        modification_request = {
+                                            "action": mt5.TRADE_ACTION_MODIFY,
+                                            "order": order_ticket,
+                                            "volume": safe_volume,
+                                            "price": pending_order.price_open,
+                                            "stoplimit": pending_order.stoplimit,
+                                            "sl": pending_order.sl,
+                                            "tp": pending_order.tp,
+                                            "type_time": pending_order.type_time,
+                                            "type_filling": pending_order.type_filling,
+                                            "expiration": pending_order.expiration
+                                        }
+                                        
+                                        # Send modification request
+                                        result = mt5.order_send(modification_request)
+                                        
+                                        if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+                                            print(f"        ✅ Successfully modified order {order_ticket} to {safe_volume} lots")
+                                            pending_order_modifications.append({
+                                                "symbol": recovery_symbol,
+                                                "order_ticket": order_ticket,
+                                                "old_volume": current_volume,
+                                                "new_volume": safe_volume,
+                                                "success": True
+                                            })
+                                        else:
+                                            error_msg = "Unknown error"
+                                            if result:
+                                                error_msg = f"Retcode: {result.retcode}"
+                                            print(f"        ❌ Failed to modify order {order_ticket}: {error_msg}")
+                                            pending_order_modifications.append({
+                                                "symbol": recovery_symbol,
+                                                "order_ticket": order_ticket,
+                                                "old_volume": current_volume,
+                                                "new_volume": safe_volume,
+                                                "success": False,
+                                                "error": error_msg
+                                            })
+                                else:
+                                    print(f"      ℹ️  No pending orders found for {recovery_symbol} to sync")
+                            elif martingale_for_position_order_scale:
+                                print(f"      ℹ️  No pending orders found to sync")
                 
                 # Save signals.json if any modifications were made
                 if modifications_made and any(mod.get('modified', False) for mod in modifications_made):
@@ -10969,7 +11058,22 @@ def martingale(inv_id=None):
                     stats["signals_modified"] = True
                     print(f"\n      ✅ Saved signals.json with {len([m for m in modifications_made if m.get('modified')])} symbols modified")
                     
-                    # Save martingale log with per-symbol details
+                    # Track pending order modifications
+                    if pending_order_modifications:
+                        successful_syncs = sum(1 for sync in pending_order_modifications if sync.get('success', False))
+                        stats["pending_orders_modified"] = successful_syncs > 0
+                        stats["pending_order_sync_results"] = {
+                            "total_attempts": len(pending_order_modifications),
+                            "successful": successful_syncs,
+                            "failed": len(pending_order_modifications) - successful_syncs,
+                            "details": pending_order_modifications
+                        }
+                        print(f"\n      🔄 Pending Order Sync Results:")
+                        print(f"        • Total attempts: {len(pending_order_modifications)}")
+                        print(f"        • Successful: {successful_syncs}")
+                        print(f"        • Failed: {len(pending_order_modifications) - successful_syncs}")
+                    
+                    # Save martingale log with per-symbol details and sync info
                     martingale_log_path = inv_root / "martingale_log.json"
                     martingale_log = {}
                     
@@ -10985,6 +11089,7 @@ def martingale(inv_id=None):
                         "balance_used_for_risk": current_balance,
                         "martingale_risk_limit": stats['martingale_maximum_risk'],
                         "martingale_loss_recovery_adder_percentage": stats['martingale_loss_recovery_adder_percentage'],
+                        "martingale_for_position_order_scale": martingale_for_position_order_scale,
                         "symbols_modified": [
                             {
                                 "symbol": mod["symbol"],
@@ -10994,6 +11099,10 @@ def martingale(inv_id=None):
                             }
                             for mod in modifications_made if mod.get("modified", False)
                         ],
+                        "pending_order_sync": {
+                            "enabled": martingale_for_position_order_scale,
+                            "results": pending_order_modifications if pending_order_modifications else []
+                        },
                         "symbol_analysis": {
                             symbol: {
                                 "total_loss_amount": analysis.get("total_loss_amount", 0),
@@ -11036,6 +11145,7 @@ def martingale(inv_id=None):
         print(f"   Maximum Lookback: {stats['maximum_martingale_lookback']} losses")
         print(f"   Martingale Maximum Risk: ${stats['martingale_maximum_risk']:.2f}")
         print(f"   Loss Recovery Adder: {stats['martingale_loss_recovery_adder_percentage']}%")
+        print(f"   Sync to Pending Orders: {'✅ ENABLED' if stats['martingale_for_position_order_scale'] else '❌ DISABLED'}")
         print(f"   Has Daily Loss: {'✅ YES' if stats['has_loss'] else '❌ NO'}")
         
         if stats.get('symbol_analysis'):
@@ -11053,9 +11163,1270 @@ def martingale(inv_id=None):
             print(f"      • Symbols requiring recovery: {', '.join(stats['symbols_with_loss'])}")
         
         if stats.get('signals_modified'):
-            print(f"      • Signals modified: ✅ YES")
+            print(f"      • Signals.json modified: ✅ YES")
         else:
-            print(f"      • Signals modified: ❌ NO")
+            print(f"      • Signals.json modified: ❌ NO")
+        
+        if stats.get('pending_orders_modified'):
+            print(f"      • Pending orders modified: ✅ YES")
+            if stats.get('pending_order_sync_results'):
+                print(f"        • Sync results: {stats['pending_order_sync_results']['successful']}/{stats['pending_order_sync_results']['total_attempts']} successful")
+        elif stats['martingale_for_position_order_scale']:
+            print(f"      • Pending orders modified: ❌ NO (none needed or none found)")
+        
+        if stats.get('order_risk_validation'):
+            print(f"\n   💰 Volume Calculations:")
+            for symbol, validation in stats['order_risk_validation'].items():
+                if isinstance(validation, dict):
+                    print(f"\n      🔹 {symbol}:")
+                    if validation.get('total_loss_amount'):
+                        print(f"         • Total loss amount: ${validation['total_loss_amount']:.2f}")
+                    if validation.get('required_profit'):
+                        print(f"         • Required profit (with adder): ${validation['required_profit']:.2f}")
+                    if validation.get('calculated_volume'):
+                        print(f"         • Calculated volume: {validation['calculated_volume']} lots")
+                    if validation.get('safe_volume'):
+                        print(f"         • Safe volume: {validation['safe_volume']} lots")
+                    if validation.get('status') == 'volume_too_small':
+                        print(f"         • Status: ⚠️  Volume too small to recover")
+                    elif validation.get('risk_check_passed'):
+                        print(f"         • Status: ✅ Within limits")
+                    else:
+                        print(f"         • Status: ⚠️  Adjusted to safe volume")
+    
+    print(f"   Errors: {stats['errors']}")
+    print(f"   Processing Status: {'✅ SUCCESS' if stats['processing_success'] else '❌ FAILED'}")
+    
+    print(f"\n{'='*10} 🏁 MARTINGALE STATUS CHECK COMPLETE {'='*10}\n")
+    
+    return stats
+
+def martingale(inv_id=None):
+
+    """
+    Function: Checks daily loss and martingale status for the day.
+    
+    Calculates:
+    - Starting balance for the day (balance at market open or start of day)
+    - Current balance
+    - Total loss incurred today
+    - Martingale lookback analysis based on maximum_martingale_lookback setting
+    - Modifies signals.json volumes based on safe volume that respects martingale_maximum_risk
+    - Validates risk for one order using EXACT same method as check_pending_orders_risk()
+    - Symbol-specific martingale tracking (each symbol tracked separately)
+    - Loss recovery with percentage adder based on martingale_loss_recovery_adder_percentage
+    - Optionally syncs volume changes to existing pending orders if martingale_for_position_order_scale is enabled
+    - PRE-SCALING: Identifies positions with pending orders at SL and modifies that pending order to recover expected loss
+    
+    Args:
+        inv_id: Optional specific investor ID to process. If None, processes all investors.
+        
+    Returns:
+        dict: Statistics about the daily loss and martingale status
+    """
+    print(f"\n{'='*10} 🎰 MARTINGALE STATUS CHECK {'='*10}")
+    if inv_id:
+        print(f" Processing single investor: {inv_id}")
+
+    # Track statistics
+    stats = {
+        "investor_id": inv_id if inv_id else "all",
+        "investors_processed": 0,
+        "martingale_enabled": False,
+        "maximum_martingale_lookback": 0,
+        "martingale_maximum_risk": 0,
+        "martingale_loss_recovery_adder_percentage": 0,
+        "martingale_for_position_order_scale": False,
+        "martingale_pre_scaling": False,
+        "has_loss": False,
+        "daily_loss": 0.0,
+        "starting_balance": 0.0,
+        "current_balance": 0.0,
+        "loss_percentage": 0.0,
+        "errors": 0,
+        "processing_success": False,
+        "symbols_with_loss": [],
+        "symbol_analysis": {},
+        "signals_modified": False,
+        "pending_orders_modified": False,
+        "risk_check_passed": False,
+        "risk_exceeded": False,
+        "order_risk_validation": {},
+        "pending_order_sync_results": {},
+        "pre_scaling_applied": False,
+        "pre_scaling_details": {}
+    }
+
+    # Determine which investors to process
+    investors_to_process = [inv_id] if inv_id else usersdictionary.keys()
+    total_investors = len(investors_to_process) if not inv_id else 1
+    processed = 0
+
+    for user_brokerid in investors_to_process:
+        processed += 1
+        print(f"\n[{processed}/{total_investors}] {user_brokerid} 🔍 Checking martingale status...")
+        
+        # Reset per-investor variables
+        pre_scaling_details = {}
+        
+        # Get broker config
+        broker_cfg = usersdictionary.get(user_brokerid)
+        if not broker_cfg:
+            print(f"  └─ ❌ No broker config found")
+            continue
+        
+        inv_root = Path(INV_PATH) / user_brokerid
+        acc_mgmt_path = inv_root / "accountmanagement.json"
+
+        if not acc_mgmt_path.exists():
+            print(f"  └─ ⚠️  Account config missing. Skipping.")
+            continue
+
+        # --- LOAD CONFIG AND CHECK MARTINGALE SETTINGS ---
+        try:
+            with open(acc_mgmt_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            
+            settings = config.get("settings", {})
+            martingale_enabled = settings.get("enable_martingale", False)
+            maximum_lookback = settings.get("maximum_martingale_lookback", 3)
+            recovery_adder_str = settings.get("martingale_loss_recovery_adder_percentage", "0%")
+            martingale_for_position_order_scale = settings.get("martingale_for_position_order_scale", False)
+            martingale_pre_scaling = settings.get("martingale_pre_scaling", False)
+            
+            # Parse percentage (remove % sign and convert to float)
+            recovery_adder_percentage = 0
+            if recovery_adder_str:
+                try:
+                    recovery_adder_percentage = float(recovery_adder_str.replace('%', ''))
+                except:
+                    recovery_adder_percentage = 0
+            
+            stats["martingale_enabled"] = martingale_enabled
+            stats["maximum_martingale_lookback"] = maximum_lookback
+            stats["martingale_loss_recovery_adder_percentage"] = recovery_adder_percentage
+            stats["martingale_for_position_order_scale"] = martingale_for_position_order_scale
+            stats["martingale_pre_scaling"] = martingale_pre_scaling
+            
+            if not martingale_enabled:
+                print(f"  └─ ⏭️  Martingale DISABLED in settings. Skipping.")
+                stats["processing_success"] = True
+                continue
+            
+            print(f"  └─ ✅ Martingale ENABLED")
+            print(f"  └─ 🔢 Maximum Martingale Lookback: {maximum_lookback} losses")
+            print(f"  └─ 📈 Loss Recovery Adder: {recovery_adder_percentage}%")
+            print(f"  └─ 🔄 Sync to Pending Orders: {'✅ ENABLED' if martingale_for_position_order_scale else '❌ DISABLED'}")
+            print(f"  └─ 🎯 PRE-SCALING: {'✅ ENABLED' if martingale_pre_scaling else '❌ DISABLED'}")
+            
+        except Exception as e:
+            print(f"  └─ ❌ Failed to read config: {e}")
+            stats["errors"] += 1
+            continue
+
+        # --- ACCOUNT INITIALIZATION ---
+        print(f"  └─ 🔌 Initializing account connection...")
+        
+        login_id = int(broker_cfg['LOGIN_ID'])
+        mt5_path = broker_cfg["TERMINAL_PATH"]
+        
+        print(f"      • Terminal Path: {mt5_path}")
+        print(f"      • Login ID: {login_id}")
+
+        # Initialize MT5 connection if needed
+        if not mt5.initialize(path=mt5_path):
+            print(f"  └─ ❌ MT5 initialization failed")
+            stats["errors"] += 1
+            continue
+
+        # Check login status
+        acc = mt5.account_info()
+        if acc is None or acc.login != login_id:
+            print(f"      🔑 Logging into account...")
+            if not mt5.login(login_id, password=broker_cfg["PASSWORD"], server=broker_cfg["SERVER"]):
+                error = mt5.last_error()
+                print(f"  └─ ❌ Login failed: {error}")
+                stats["errors"] += 1
+                continue
+            print(f"      ✅ Successfully logged into account")
+        else:
+            print(f"      ✅ Already logged into account")
+
+        # --- GET CURRENT BALANCE ---
+        account_info = mt5.account_info()
+        if not account_info:
+            print(f"  └─ ❌ Failed to get account information")
+            stats["errors"] += 1
+            continue
+        
+        current_balance = account_info.balance
+        stats["current_balance"] = current_balance
+        
+        print(f"      • Current Balance: ${current_balance:.2f}")
+
+        # --- GET MARTINGALE RISK BASED ON CURRENT BALANCE ---
+        martingale_risk_map = config.get("martingale_risk_management", {})
+        martingale_max_risk = None
+        
+        if martingale_risk_map:
+            print(f"  └─ 📊 Determining Martingale Risk based on balance ${current_balance:.2f}...")
+            
+            for range_str, risk_value in martingale_risk_map.items():
+                try:
+                    raw_range = range_str.split("_")[0]
+                    low_str, high_str = raw_range.split("-")
+                    low = float(low_str)
+                    high = float(high_str)
+                    
+                    if low <= current_balance <= high:
+                        martingale_max_risk = float(risk_value)
+                        print(f"      • Found matching range: {range_str}")
+                        print(f"      • Risk limit: ${martingale_max_risk:.2f}")
+                        break
+                except Exception as e:
+                    print(f"      ⚠️  Error parsing range '{range_str}': {e}")
+                    continue
+            
+            if martingale_max_risk is None:
+                print(f"      ⚠️  No risk mapping found for balance ${current_balance:.2f}")
+                print(f"      Using default risk: $500")
+                martingale_max_risk = 500
+        else:
+            print(f"      ⚠️  No martingale_risk_management section found in config")
+            print(f"      Using default risk: $500")
+            martingale_max_risk = 500
+        
+        stats["martingale_maximum_risk"] = martingale_max_risk
+        print(f"  └─ 💰 Martingale Maximum Risk: ${martingale_max_risk:.2f}")
+
+        # --- GET STARTING BALANCE FOR TODAY ---
+        daily_stats_path = inv_root / "daily_stats.json"
+        starting_balance = None
+        
+        today_date = datetime.now().date()
+        today_str = today_date.strftime("%Y-%m-%d")
+        
+        print(f"      • Today's Date: {today_str}")
+        
+        if daily_stats_path.exists():
+            try:
+                with open(daily_stats_path, 'r', encoding='utf-8') as f:
+                    daily_stats = json.load(f)
+                
+                if today_str in daily_stats:
+                    starting_balance = daily_stats[today_str].get("starting_balance")
+                    print(f"      • Found recorded starting balance: ${starting_balance:.2f}")
+                else:
+                    print(f"      • No recorded starting balance for today")
+            except Exception as e:
+                print(f"      ⚠️  Could not read daily stats: {e}")
+        else:
+            print(f"      • No daily stats file found")
+        
+        if starting_balance is None:
+            print(f"      🔍 Calculating starting balance from trade history...")
+            
+            from_date = datetime(today_date.year, today_date.month, today_date.day, 0, 0, 0)
+            to_date = datetime(today_date.year, today_date.month, today_date.day, 23, 59, 59)
+            deals = mt5.history_deals_get(from_date, to_date)
+            
+            if deals is None:
+                print(f"      ⚠️  Could not retrieve deal history")
+                starting_balance = current_balance
+                print(f"      • Using current balance as starting balance (no trades today)")
+            else:
+                today_profit = 0.0
+                today_commission = 0.0
+                today_swap = 0.0
+                
+                for deal in deals:
+                    if deal.profit != 0 or deal.commission != 0 or deal.swap != 0:
+                        today_profit += deal.profit
+                        today_commission += deal.commission
+                        today_swap += deal.swap
+                
+                total_pl = today_profit + today_commission + today_swap
+                starting_balance = current_balance - total_pl
+                
+                print(f"      • Calculated starting balance: ${starting_balance:.2f}")
+                print(f"      • Total profit/loss today: ${total_pl:.2f}")
+            
+            try:
+                if daily_stats_path.exists():
+                    with open(daily_stats_path, 'r', encoding='utf-8') as f:
+                        daily_stats = json.load(f)
+                else:
+                    daily_stats = {}
+                
+                if today_str not in daily_stats:
+                    daily_stats[today_str] = {}
+                
+                daily_stats[today_str]["starting_balance"] = starting_balance
+                daily_stats[today_str]["last_updated"] = datetime.now().isoformat()
+                
+                with open(daily_stats_path, 'w', encoding='utf-8') as f:
+                    json.dump(daily_stats, f, indent=2, ensure_ascii=False)
+                
+                print(f"      • Saved starting balance to daily_stats.json")
+            except Exception as e:
+                print(f"      ⚠️  Could not save daily stats: {e}")
+        
+        stats["starting_balance"] = starting_balance
+        
+        # --- CALCULATE DAILY LOSS ---
+        daily_loss = starting_balance - current_balance
+        
+        if daily_loss > 0:
+            loss_percentage = (daily_loss / starting_balance) * 100
+            
+            stats["has_loss"] = True
+            stats["daily_loss"] = daily_loss
+            stats["loss_percentage"] = loss_percentage
+            
+            print(f"\n  └─ 📉 DAILY LOSS DETECTED!")
+            print(f"      • Starting Balance: ${starting_balance:.2f}")
+            print(f"      • Current Balance: ${current_balance:.2f}")
+            print(f"      • Total Loss Today: ${daily_loss:.2f}")
+            print(f"      • Loss Percentage: {loss_percentage:.2f}%")
+        else:
+            print(f"\n  └─ ✅ NO DAILY LOSS")
+            print(f"      • Starting Balance: ${starting_balance:.2f}")
+            print(f"      • Current Balance: ${current_balance:.2f}")
+            print(f"      • Change: ${current_balance - starting_balance:.2f} ({(current_balance - starting_balance) / starting_balance * 100:.2f}%)")
+        
+        # --- SYMBOL-SPECIFIC MARTINGALE LOOKBACK ANALYSIS ---
+        print(f"\n  └─ 🔍 Performing Symbol-Specific Martingale Lookback Analysis...")
+        
+        from_date = datetime(today_date.year, today_date.month, today_date.day, 0, 0, 0)
+        to_date = datetime(today_date.year, today_date.month, today_date.day, 23, 59, 59)
+        
+        try:
+            all_deals = mt5.history_deals_get(from_date, to_date)
+        except Exception as e:
+            print(f"      ⚠️  Could not get history deals: {e}")
+            all_deals = None
+        
+        # Dictionary to store per-symbol analysis
+        symbol_analysis = {}
+        
+        if all_deals is None or len(all_deals) == 0:
+            print(f"      ℹ️  No trade history found for today")
+        else:
+            try:
+                all_deals = sorted(all_deals, key=lambda x: x.time)
+                
+                # Group deals by symbol
+                deals_by_symbol = {}
+                for deal in all_deals:
+                    symbol = deal.symbol
+                    if symbol not in deals_by_symbol:
+                        deals_by_symbol[symbol] = []
+                    deals_by_symbol[symbol].append(deal)
+                
+                print(f"      • Total symbols traded today: {len(deals_by_symbol.keys())}")
+                
+                # Process each symbol separately
+                for symbol, symbol_deals in deals_by_symbol.items():
+                    print(f"\n      {'='*50}")
+                    print(f"      📊 Analyzing symbol: {symbol}")
+                    print(f"      {'='*50}")
+                    
+                    # Build P/L sequence for this symbol
+                    pl_sequence = []
+                    for deal in symbol_deals:
+                        total_pl = deal.profit + deal.commission + deal.swap
+                        if total_pl != 0:
+                            pl_sequence.append({
+                                "ticket": deal.ticket,
+                                "symbol": deal.symbol,
+                                "time": deal.time,
+                                "profit_loss": total_pl,
+                                "type": "PROFIT" if total_pl > 0 else "LOSS",
+                                "volume": deal.volume
+                            })
+                    
+                    print(f"      • Total deals for {symbol}: {len(symbol_deals)}")
+                    print(f"      • Non-zero P/L entries: {len(pl_sequence)}")
+                    
+                    if len(pl_sequence) == 0:
+                        print(f"      ℹ️  No profit/loss entries found for {symbol}")
+                        continue
+                    
+                    # Display sequence
+                    print(f"      📊 Profit/Loss Sequence (chronological):")
+                    display_count = min(10, len(pl_sequence))
+                    for idx, entry in enumerate(pl_sequence[:display_count], 1):
+                        pl_sign = "📈" if entry["profit_loss"] > 0 else "📉"
+                        print(f"        {idx}. {pl_sign} {entry['symbol']}: ${entry['profit_loss']:.2f} ({entry['type']}) - Volume: {entry['volume']} lots")
+                    
+                    latest_entry = pl_sequence[-1]
+                    latest_is_profit = latest_entry["profit_loss"] > 0
+                    
+                    print(f"\n      🎯 Latest Entry Analysis:")
+                    print(f"        • Latest is: {'PROFIT' if latest_is_profit else 'LOSS'}")
+                    print(f"        • Amount: ${abs(latest_entry['profit_loss']):.2f}")
+                    print(f"        • Volume: {latest_entry['volume']} lots")
+                    
+                    lookback_count = maximum_lookback
+                    
+                    # Collect losses within lookback period (backwards scan)
+                    print(f"\n      🔍 Analyzing losses within lookback period for {symbol}...")
+                    
+                    losses_found = []
+                    cumulative_profit = 0.0
+                    
+                    # Scan backwards from the latest entry to collect losses
+                    for i in range(len(pl_sequence) - 1, -1, -1):
+                        entry = pl_sequence[i]
+                        
+                        if entry["profit_loss"] < 0:
+                            losses_found.append(entry)
+                            print(f"        • Found loss: {entry['symbol']}: ${abs(entry['profit_loss']):.2f}")
+                        else:
+                            cumulative_profit += entry["profit_loss"]
+                            print(f"        • Found profit: {entry['symbol']}: ${entry['profit_loss']:.2f} (Cumulative profit: ${cumulative_profit:.2f})")
+                        
+                        if len(losses_found) >= lookback_count:
+                            print(f"        • Reached lookback limit of {lookback_count} losses")
+                            break
+                    
+                    # Reverse to get chronological order
+                    lookback_losses = list(reversed(losses_found))
+                    
+                    # Initialize symbol analysis
+                    symbol_analysis[symbol] = {
+                        "symbol": symbol,
+                        "has_losses": len(lookback_losses) > 0,
+                        "lookback_losses": [],
+                        "total_loss_amount": 0.0,
+                        "total_loss_volume": 0.0,
+                        "required_profit": 0.0,
+                        "required_profit_with_adder": 0.0,
+                        "profits_after_losses_total": 0.0,
+                        "latest_is_profit": latest_is_profit,
+                        "latest_amount": abs(latest_entry["profit_loss"]),
+                        "latest_volume": latest_entry["volume"],
+                        "losses_in_lookback": len(lookback_losses)
+                    }
+                    
+                    if lookback_losses:
+                        # Calculate total loss amount for this symbol
+                        total_loss_amount = sum(abs(loss["profit_loss"]) for loss in lookback_losses)
+                        total_loss_volume = sum(loss["volume"] for loss in lookback_losses)
+                        
+                        print(f"\n      📊 Loss Analysis for {symbol}:")
+                        print(f"        • Total losses found: {len(lookback_losses)}")
+                        print(f"        • TOTAL LOSS AMOUNT: ${total_loss_amount:.2f}")
+                        print(f"        • Total loss volume: {total_loss_volume} lots")
+                        
+                        # Find earliest loss index to identify profits after losses
+                        earliest_loss_index = None
+                        for i, entry in enumerate(pl_sequence):
+                            if entry["ticket"] == lookback_losses[0]["ticket"]:
+                                earliest_loss_index = i
+                                break
+                        
+                        # Collect profits that occurred AFTER the earliest loss
+                        profits_after_losses = []
+                        if earliest_loss_index is not None:
+                            for i in range(earliest_loss_index + 1, len(pl_sequence)):
+                                if pl_sequence[i]["profit_loss"] > 0:
+                                    profits_after_losses.append(pl_sequence[i])
+                        
+                        total_profit_after = sum(p["profit_loss"] for p in profits_after_losses)
+                        
+                        print(f"\n      💰 Profit Analysis for {symbol}:")
+                        print(f"        • Profits after the losses: {len(profits_after_losses)}")
+                        print(f"        • Total profit after losses: ${total_profit_after:.2f}")
+                        
+                        # Calculate required profit (uncovered portion)
+                        if total_profit_after >= total_loss_amount:
+                            print(f"        ✅ Profits after losses cover all losses")
+                            required_profit = 0
+                        else:
+                            required_profit = total_loss_amount - total_profit_after
+                            print(f"        ❌ Profits after losses do NOT cover all losses")
+                            print(f"        • Uncovered loss amount: ${required_profit:.2f}")
+                        
+                        # Apply percentage adder to required profit
+                        adder_amount = required_profit * (recovery_adder_percentage / 100)
+                        required_profit_with_adder = required_profit + adder_amount
+                        
+                        if recovery_adder_percentage > 0 and required_profit > 0:
+                            print(f"\n      📈 Loss Recovery Adder ({recovery_adder_percentage}%):")
+                            print(f"        • Base required profit: ${required_profit:.2f}")
+                            print(f"        • Adder amount: ${adder_amount:.2f}")
+                            print(f"        • Total to recover: ${required_profit_with_adder:.2f}")
+                        else:
+                            print(f"\n      📈 Loss Recovery:")
+                            print(f"        • Required profit: ${required_profit:.2f}")
+                        
+                        # Store details
+                        symbol_analysis[symbol]["lookback_losses"] = [
+                            {
+                                "symbol": loss["symbol"],
+                                "amount": abs(loss["profit_loss"]),
+                                "ticket": loss["ticket"],
+                                "volume": loss["volume"]
+                            }
+                            for loss in lookback_losses
+                        ]
+                        symbol_analysis[symbol]["total_loss_amount"] = total_loss_amount
+                        symbol_analysis[symbol]["total_loss_volume"] = total_loss_volume
+                        symbol_analysis[symbol]["required_profit"] = required_profit
+                        symbol_analysis[symbol]["required_profit_with_adder"] = required_profit_with_adder
+                        symbol_analysis[symbol]["profits_after_losses_total"] = total_profit_after
+                        
+                        # Display losses details
+                        print(f"\n      📉 Losses within lookback period for {symbol}:")
+                        for idx, loss in enumerate(lookback_losses, 1):
+                            print(f"        {idx}. {loss['symbol']}: ${abs(loss['profit_loss']):.2f} (Volume: {loss['volume']} lots)")
+                        
+                        # Display profits after losses
+                        if profits_after_losses:
+                            print(f"\n      📈 Profits that occurred after losses for {symbol}:")
+                            for idx, profit in enumerate(profits_after_losses, 1):
+                                print(f"        {idx}. {profit['symbol']}: ${profit['profit_loss']:.2f}")
+                    else:
+                        print(f"        ℹ️  No losses found within lookback period for {symbol}")
+                        symbol_analysis[symbol]["required_profit"] = 0
+                        symbol_analysis[symbol]["required_profit_with_adder"] = 0
+                        symbol_analysis[symbol]["total_loss_amount"] = 0
+                    
+                    print(f"\n      📊 Martingale Lookback Summary for {symbol}:")
+                    print(f"        • Lookback limit: {lookback_count} losses")
+                    print(f"        • Losses found in lookback: {len(lookback_losses)}")
+                    if len(lookback_losses) > 0 or symbol_analysis[symbol].get("required_profit", 0) > 0:
+                        print(f"        • TOTAL LOSS AMOUNT: ${symbol_analysis[symbol]['total_loss_amount']:.2f}")
+                        print(f"        • Total loss volume (ref only): {symbol_analysis[symbol]['total_loss_volume']} lots")
+                        print(f"        • Profits after losses: ${symbol_analysis[symbol]['profits_after_losses_total']:.2f}")
+                        print(f"        • Required profit (base): ${symbol_analysis[symbol]['required_profit']:.2f}")
+                        print(f"        • Required profit (with {recovery_adder_percentage}% adder): ${symbol_analysis[symbol]['required_profit_with_adder']:.2f}")
+                    else:
+                        print(f"        • No losses to recover")
+                        
+            except Exception as e:
+                print(f"      ❌ Error in lookback analysis: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        # --- PRE-SCALING: MODIFY PENDING ORDER AT POSITION SL (CANCEL AND RECREATE APPROACH) ---
+        if martingale_pre_scaling:
+            print(f"\n  └─ 🎯 PRE-SCALING: Checking for positions with pending orders at SL...")
+            
+            try:
+                # Get all positions and pending orders
+                positions = mt5.positions_get()
+                pending_orders = mt5.orders_get()
+                
+                if positions is None:
+                    positions = []
+                if pending_orders is None:
+                    pending_orders = []
+                
+                print(f"      • Found {len(positions)} positions and {len(pending_orders)} pending orders")
+                
+                if positions and pending_orders:
+                    # Group pending orders by symbol
+                    pending_by_symbol = {}
+                    for order in pending_orders:
+                        symbol = order.symbol
+                        if symbol not in pending_by_symbol:
+                            pending_by_symbol[symbol] = []
+                        pending_by_symbol[symbol].append(order)
+                    
+                    # Check each position
+                    for position in positions:
+                        try:
+                            symbol = position.symbol
+                            position_sl = position.sl
+                            position_type = position.type
+                            position_volume = position.volume
+                            position_entry = position.price_open
+                            
+                            print(f"\n      {'='*50}")
+                            print(f"      📍 Checking position for PRE-SCALING: {symbol}")
+                            print(f"      {'='*50}")
+                            print(f"        • Position Type: {'BUY' if position_type == mt5.POSITION_TYPE_BUY else 'SELL'}")
+                            print(f"        • Entry: {position_entry}")
+                            print(f"        • SL: {position_sl}")
+                            print(f"        • Volume: {position_volume}")
+                            
+                            if position_sl is None or position_sl == 0:
+                                print(f"        ℹ️  Position has no SL set - skipping pre-scaling")
+                                continue
+                            
+                            # Check if there are pending orders for this symbol
+                            if symbol not in pending_by_symbol:
+                                print(f"        ℹ️  No pending orders found for {symbol}")
+                                continue
+                            
+                            # Find pending order at the SL price
+                            found_matching_order = None
+                            expected_pending_type = None
+                            
+                            if position_type == mt5.POSITION_TYPE_BUY:
+                                # For BUY position, look for SELL order at SL (below entry)
+                                expected_pending_type = "SELL"
+                                expected_order_types = [mt5.ORDER_TYPE_SELL_LIMIT, mt5.ORDER_TYPE_SELL_STOP]
+                            else:
+                                # For SELL position, look for BUY order at SL (above entry)
+                                expected_pending_type = "BUY"
+                                expected_order_types = [mt5.ORDER_TYPE_BUY_LIMIT, mt5.ORDER_TYPE_BUY_STOP]
+                            
+                            for order in pending_by_symbol[symbol]:
+                                if order.type in expected_order_types:
+                                    # Check if order entry price matches position SL
+                                    if abs(order.price_open - position_sl) < 0.00001:
+                                        found_matching_order = order
+                                        print(f"        ✅ Found matching pending order at SL price!")
+                                        print(f"          • Order Ticket: {order.ticket}")
+                                        print(f"          • Order Type: {'SELL' if expected_pending_type == 'SELL' else 'BUY'}")
+                                        print(f"          • Entry: {order.price_open}")
+                                        print(f"          • Current Volume: {order.volume_initial}")
+                                        break
+                            
+                            if found_matching_order:
+                                # Calculate expected loss if position hits SL
+                                symbol_info = mt5.symbol_info(symbol)
+                                if symbol_info:
+                                    contract_size = symbol_info.trade_contract_size
+                                    
+                                    # Calculate loss amount
+                                    if position_type == mt5.POSITION_TYPE_BUY:
+                                        # BUY position loss = (entry - SL) * volume * contract_size
+                                        price_diff = position_entry - position_sl
+                                    else:
+                                        # SELL position loss = (SL - entry) * volume * contract_size
+                                        price_diff = position_sl - position_entry
+                                    
+                                    expected_loss = price_diff * position_volume * contract_size
+                                    
+                                    print(f"\n        💰 PRE-SCALING CALCULATION:")
+                                    print(f"          • Price difference to SL: {price_diff:.5f}")
+                                    print(f"          • Contract size: {contract_size}")
+                                    print(f"          • Position volume: {position_volume}")
+                                    print(f"          • Expected loss if SL hit: ${abs(expected_loss):.2f}")
+                                    
+                                    # Get the uncovered loss for this symbol from the analysis
+                                    symbol_data = symbol_analysis.get(symbol, {})
+                                    uncovered_loss = symbol_data.get("required_profit_with_adder", 0)
+                                    
+                                    # Add expected loss to uncovered loss
+                                    total_to_recover = uncovered_loss + abs(expected_loss)
+                                    
+                                    print(f"\n        🎯 PRE-SCALING TARGET:")
+                                    print(f"          • Current uncovered loss: ${uncovered_loss:.2f}")
+                                    print(f"          • Expected loss from position: ${abs(expected_loss):.2f}")
+                                    print(f"          • TOTAL TO RECOVER: ${total_to_recover:.2f}")
+                                    
+                                    # Get order details for volume calculation
+                                    order_entry = found_matching_order.price_open
+                                    order_sl = found_matching_order.sl
+                                    
+                                    if order_sl is None or order_sl == 0:
+                                        print(f"        ⚠️  Pending order has no SL, cannot calculate volume")
+                                        continue
+                                    
+                                    # Determine order type for profit calculation
+                                    is_sell_order = found_matching_order.type in [mt5.ORDER_TYPE_SELL_LIMIT, mt5.ORDER_TYPE_SELL_STOP]
+                                    
+                                    if is_sell_order:
+                                        calc_type = mt5.ORDER_TYPE_SELL
+                                        order_direction = "SELL"
+                                    else:
+                                        calc_type = mt5.ORDER_TYPE_BUY
+                                        order_direction = "BUY"
+                                    
+                                    # Calculate price difference for the pending order
+                                    order_price_diff = abs(order_entry - order_sl)
+                                    
+                                    if order_price_diff == 0:
+                                        print(f"        ⚠️  Order entry equals SL, cannot calculate volume")
+                                        continue
+                                    
+                                    # Calculate required volume to recover total amount
+                                    # Volume = total_to_recover / (price_diff * contract_size)
+                                    estimated_volume = total_to_recover / (order_price_diff * contract_size)
+                                    required_volume = round(estimated_volume, 2)
+                                    
+                                    print(f"\n        📐 Volume Calculation:")
+                                    print(f"          • Order entry: {order_entry}")
+                                    print(f"          • Order SL: {order_sl}")
+                                    print(f"          • Price difference: {order_price_diff:.5f}")
+                                    print(f"          • Estimated volume: {estimated_volume:.4f} lots")
+                                    print(f"          • Required volume: {required_volume} lots")
+                                    
+                                    # Validate against maximum risk
+                                    def calculate_profit_for_volume(volume):
+                                        profit = mt5.order_calc_profit(
+                                            calc_type,
+                                            symbol,
+                                            volume,
+                                            order_entry,
+                                            order_sl
+                                        )
+                                        return abs(profit) if profit is not None else None
+                                    
+                                    risk_for_required = calculate_profit_for_volume(required_volume)
+                                    
+                                    if risk_for_required is None:
+                                        print(f"        ⚠️  Could not calculate risk")
+                                        continue
+                                    
+                                    print(f"\n        🔍 Validating risk...")
+                                    print(f"          • Martingale Maximum Risk: ${martingale_max_risk:.2f}")
+                                    print(f"          • Calculated risk for {required_volume} lots: ${risk_for_required:.2f}")
+                                    
+                                    safe_volume = required_volume
+                                    if risk_for_required > martingale_max_risk:
+                                        print(f"          ❌ RISK CHECK FAILED - Adjusting volume")
+                                        # Binary search for safe volume
+                                        low = 0.01
+                                        high = required_volume
+                                        safe_volume = low
+                                        iterations = 0
+                                        
+                                        while iterations < 20 and (high - low) > 0.001:
+                                            mid = (low + high) / 2
+                                            mid_risk = calculate_profit_for_volume(mid)
+                                            
+                                            if mid_risk is None:
+                                                break
+                                            
+                                            if mid_risk <= martingale_max_risk:
+                                                safe_volume = mid
+                                                low = mid
+                                            else:
+                                                high = mid
+                                            
+                                            iterations += 1
+                                        
+                                        safe_volume = max(0.01, round(safe_volume, 2))
+                                        safe_risk = calculate_profit_for_volume(safe_volume)
+                                        print(f"          🔧 Adjusted to safe volume: {safe_volume} lots (risk: ${safe_risk:.2f})")
+                                    else:
+                                        print(f"          ✅ RISK CHECK PASSED")
+                                    
+                                    # Check if volume needs to be modified
+                                    current_volume = found_matching_order.volume_initial
+                                    
+                                    if abs(safe_volume - current_volume) < 0.001:
+                                        print(f"\n        ℹ️  Volume already correct: {current_volume} lots")
+                                    else:
+                                        print(f"\n        🔄 CANCELLING and RE-CREATING PENDING ORDER:")
+                                        print(f"          • Old Order Ticket: {found_matching_order.ticket}")
+                                        print(f"          • Current Volume: {current_volume} lots")
+                                        print(f"          • New Volume: {safe_volume} lots")
+                                        
+                                        # Step 1: Cancel the existing order
+                                        cancel_request = {
+                                            "action": mt5.TRADE_ACTION_REMOVE,
+                                            "order": found_matching_order.ticket,
+                                        }
+                                        
+                                        cancel_result = mt5.order_send(cancel_request)
+                                        
+                                        if cancel_result and cancel_result.retcode == mt5.TRADE_RETCODE_DONE:
+                                            print(f"          ✅ Successfully cancelled old order (Ticket: {found_matching_order.ticket})")
+                                            
+                                            # Step 2: Create new order with the correct volume
+                                            # Prepare the order request
+                                            order_request = {
+                                                "action": mt5.TRADE_ACTION_PENDING,
+                                                "symbol": symbol,
+                                                "volume": safe_volume,
+                                                "type": found_matching_order.type,
+                                                "price": found_matching_order.price_open,
+                                                "sl": found_matching_order.sl,
+                                                "tp": found_matching_order.tp if found_matching_order.tp else 0,
+                                                "deviation": 20,
+                                                "magic": found_matching_order.magic if hasattr(found_matching_order, 'magic') else 0,
+                                                "comment": found_matching_order.comment if hasattr(found_matching_order, 'comment') else "Martingale Pre-scaling",
+                                                "type_time": found_matching_order.type_time,
+                                                "type_filling": found_matching_order.type_filling,
+                                            }
+                                            
+                                            # Add expiration if it exists
+                                            if hasattr(found_matching_order, 'expiration') and found_matching_order.expiration:
+                                                order_request["expiration"] = found_matching_order.expiration
+                                            
+                                            # Send the new order
+                                            new_order_result = mt5.order_send(order_request)
+                                            
+                                            if new_order_result and new_order_result.retcode == mt5.TRADE_RETCODE_DONE:
+                                                print(f"          ✅ Successfully created new order with volume {safe_volume} lots")
+                                                print(f"          • New Order Ticket: {new_order_result.order}")
+                                                
+                                                pre_scaling_details[symbol] = {
+                                                    "symbol": symbol,
+                                                    "has_pre_scaling": True,
+                                                    "position_ticket": position.ticket,
+                                                    "expected_loss": abs(expected_loss),
+                                                    "old_order_ticket": found_matching_order.ticket,
+                                                    "new_order_ticket": new_order_result.order,
+                                                    "old_volume": current_volume,
+                                                    "new_volume": safe_volume,
+                                                    "total_to_recover": total_to_recover,
+                                                    "success": True,
+                                                    "method": "cancel_and_create"
+                                                }
+                                                
+                                                stats["pre_scaling_applied"] = True
+                                                stats["pending_orders_modified"] = True
+                                                
+                                                # Mark this symbol as handled by pre-scaling
+                                                if symbol in symbol_analysis:
+                                                    symbol_analysis[symbol]["handled_by_pre_scaling"] = True
+                                            else:
+                                                error_msg = "Unknown error"
+                                                if new_order_result:
+                                                    error_msg = f"Retcode: {new_order_result.retcode}, Comment: {new_order_result.comment}"
+                                                print(f"          ❌ Failed to create new order: {error_msg}")
+                                                
+                                                pre_scaling_details[symbol] = {
+                                                    "symbol": symbol,
+                                                    "has_pre_scaling": True,
+                                                    "position_ticket": position.ticket,
+                                                    "expected_loss": abs(expected_loss),
+                                                    "old_order_ticket": found_matching_order.ticket,
+                                                    "old_volume": current_volume,
+                                                    "new_volume": safe_volume,
+                                                    "total_to_recover": total_to_recover,
+                                                    "success": False,
+                                                    "error": error_msg,
+                                                    "method": "cancel_and_create"
+                                                }
+                                                
+                                                stats["errors"] += 1
+                                        else:
+                                            error_msg = "Unknown error"
+                                            if cancel_result:
+                                                error_msg = f"Retcode: {cancel_result.retcode}, Comment: {cancel_result.comment}"
+                                            print(f"          ❌ Failed to cancel old order: {error_msg}")
+                                            
+                                            pre_scaling_details[symbol] = {
+                                                "symbol": symbol,
+                                                "has_pre_scaling": True,
+                                                "position_ticket": position.ticket,
+                                                "expected_loss": abs(expected_loss),
+                                                "old_order_ticket": found_matching_order.ticket,
+                                                "old_volume": current_volume,
+                                                "new_volume": safe_volume,
+                                                "total_to_recover": total_to_recover,
+                                                "success": False,
+                                                "error": error_msg,
+                                                "method": "cancel_failed"
+                                            }
+                                            
+                                            stats["errors"] += 1
+                                else:
+                                    print(f"        ⚠️  Could not get symbol info for {symbol}")
+                            else:
+                                print(f"        ℹ️  No pending order found at SL price")
+                                
+                        except Exception as e:
+                            print(f"        ❌ Error processing position: {e}")
+                            import traceback
+                            traceback.print_exc()
+                            continue
+                else:
+                    if not positions:
+                        print(f"      ℹ️  No positions found to check for pre-scaling")
+                    if not pending_orders:
+                        print(f"      ℹ️  No pending orders found to check for pre-scaling")
+                        
+            except Exception as e:
+                print(f"      ❌ Error in pre-scaling: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        stats["symbol_analysis"] = symbol_analysis
+        stats["pre_scaling_details"] = pre_scaling_details
+        
+        # Track which symbols have losses to recover (for signals.json modification)
+        symbols_with_recovery_needed = []
+        for symbol, analysis in symbol_analysis.items():
+            # Skip symbols that were handled by pre-scaling
+            if analysis.get("handled_by_pre_scaling", False):
+                continue
+            if analysis.get("required_profit_with_adder", 0) > 0:
+                symbols_with_recovery_needed.append(symbol)
+        
+        stats["symbols_with_loss"] = symbols_with_recovery_needed
+        
+        # --- SYMBOL-SPECIFIC MARTINGALE VOLUME MODIFICATION (for signals.json) ---
+        # Only modify signals.json for symbols that need recovery but weren't handled by pre-scaling
+        if symbols_with_recovery_needed:
+            print(f"\n  └─ 🎰 Symbol-Specific Martingale Volume Adjustment...")
+            
+            signals_path = inv_root / "prices" / "signals.json"
+            
+            if not signals_path.exists():
+                print(f"      ⚠️  signals.json not found at {signals_path}")
+                print(f"      ⏭️  Skipping volume modification")
+            else:
+                try:
+                    with open(signals_path, 'r', encoding='utf-8') as f:
+                        signals_data = json.load(f)
+                    
+                    print(f"      📂 Loaded signals.json")
+                    print(f"      🔄 Symbols requiring recovery: {', '.join(symbols_with_recovery_needed)}")
+                    
+                    # Track modifications per symbol
+                    modifications_made = []
+                    
+                    # Process each symbol that needs recovery
+                    for recovery_symbol in symbols_with_recovery_needed:
+                        print(f"\n      {'='*50}")
+                        print(f"      🎯 Processing symbol: {recovery_symbol}")
+                        print(f"      {'='*50}")
+                        
+                        symbol_analysis_data = symbol_analysis.get(recovery_symbol, {})
+                        required_profit_with_adder = symbol_analysis_data.get("required_profit_with_adder", 0)
+                        
+                        if required_profit_with_adder <= 0:
+                            print(f"      ℹ️  No recovery needed for {recovery_symbol}")
+                            continue
+                        
+                        print(f"      💰 Required profit to recover (with {stats['martingale_loss_recovery_adder_percentage']}% adder): ${required_profit_with_adder:.2f}")
+                        print(f"      📊 Base loss amount: ${symbol_analysis_data.get('total_loss_amount', 0):.2f}")
+                        
+                        # Find orders for this specific symbol in signals.json
+                        symbol_orders_found = False
+                        sample_order = None
+                        sample_entry = None
+                        sample_stop = None
+                        sample_order_type = None
+                        order_category = None
+                        order_type_bid_ask = None
+                        
+                        for category_name, category_data in signals_data.get('categories', {}).items():
+                            symbols_in_category = category_data.get('symbols', {})
+                            
+                            if recovery_symbol in symbols_in_category:
+                                symbol_signals = symbols_in_category[recovery_symbol]
+                                
+                                # Check for bid orders
+                                if 'bid_orders' in symbol_signals and symbol_signals['bid_orders']:
+                                    sample_order = symbol_signals['bid_orders'][0]
+                                    sample_entry = sample_order.get('entry')
+                                    sample_stop = sample_order.get('exit')
+                                    sample_order_type = sample_order.get('order_type')
+                                    order_category = category_name
+                                    order_type_bid_ask = 'bid'
+                                    symbol_orders_found = True
+                                    break
+                                
+                                # Check for ask orders
+                                if 'ask_orders' in symbol_signals and symbol_signals['ask_orders']:
+                                    sample_order = symbol_signals['ask_orders'][0]
+                                    sample_entry = sample_order.get('entry')
+                                    sample_stop = sample_order.get('exit')
+                                    sample_order_type = sample_order.get('order_type')
+                                    order_category = category_name
+                                    order_type_bid_ask = 'ask'
+                                    symbol_orders_found = True
+                                    break
+                        
+                        if not symbol_orders_found or not sample_entry or not sample_stop:
+                            print(f"      ⚠️  No orders found for {recovery_symbol} in signals.json")
+                            continue
+                        
+                        print(f"      📝 Found orders for {recovery_symbol}:")
+                        print(f"        • Category: {order_category}")
+                        print(f"        • Order Type: {sample_order_type}")
+                        print(f"        • Entry Price: {sample_entry}")
+                        print(f"        • Stop Loss: {sample_stop}")
+                        
+                        is_buy = 'buy' in sample_order_type.lower()
+                        
+                        if is_buy:
+                            calc_type = mt5.ORDER_TYPE_BUY
+                            order_direction = "BUY"
+                        else:
+                            calc_type = mt5.ORDER_TYPE_SELL
+                            order_direction = "SELL"
+                        
+                        symbol_info = mt5.symbol_info(recovery_symbol)
+                        if not symbol_info:
+                            print(f"      ⚠️  Cannot get symbol info for {recovery_symbol}")
+                            continue
+                        
+                        if not symbol_info.visible:
+                            mt5.symbol_select(recovery_symbol, True)
+                            print(f"      • Selected {recovery_symbol} in Market Watch")
+                        
+                        price_diff = abs(sample_entry - sample_stop)
+                        contract_size = symbol_info.trade_contract_size
+                        
+                        print(f"      📊 Symbol Information:")
+                        print(f"        • Contract size: {contract_size}")
+                        print(f"        • Price difference (entry to stop): {price_diff:.2f}")
+                        
+                        def calculate_profit_for_volume(volume):
+                            profit = mt5.order_calc_profit(
+                                calc_type,
+                                recovery_symbol,
+                                volume,
+                                sample_entry,
+                                sample_stop
+                            )
+                            return abs(profit) if profit is not None else None
+                        
+                        # Calculate volume needed to recover the EXACT loss amount (with adder)
+                        if price_diff * contract_size > 0:
+                            estimated_volume = required_profit_with_adder / (price_diff * contract_size)
+                            print(f"      📐 Estimated volume to recover ${required_profit_with_adder:.2f}: {estimated_volume:.4f} lots")
+                            
+                            # Round to 2 decimal places
+                            required_volume = round(estimated_volume, 2)
+                        else:
+                            print(f"      ⚠️  Invalid price difference or contract size")
+                            continue
+                        
+                        min_volume = 0.01
+                        if required_volume < min_volume:
+                            print(f"      ⚠️  Required volume ({required_volume} lots) is below minimum lot size ({min_volume} lots)")
+                            print(f"      ⏭️  Skipping volume modification for {recovery_symbol} - volume too small to recover loss")
+                            stats["order_risk_validation"][recovery_symbol] = {
+                                "symbol": recovery_symbol,
+                                "required_profit": required_profit_with_adder,
+                                "total_loss_amount": symbol_analysis_data.get('total_loss_amount', 0),
+                                "estimated_volume": estimated_volume,
+                                "min_volume_needed": min_volume,
+                                "status": "volume_too_small",
+                                "message": f"Need at least {min_volume} lots to recover ${required_profit_with_adder:.2f}, but calculated volume is {required_volume:.4f} lots"
+                            }
+                            continue
+                        
+                        actual_profit = calculate_profit_for_volume(required_volume)
+                        
+                        if actual_profit is not None:
+                            print(f"      💰 Calculated volume: {required_volume} lots")
+                            print(f"        • Expected profit: ${actual_profit:.2f}")
+                            print(f"        • Required profit (with adder): ${required_profit_with_adder:.2f}")
+                            print(f"        • Difference: ${actual_profit - required_profit_with_adder:.2f}")
+                            
+                            # Validate against maximum risk
+                            risk_for_required = calculate_profit_for_volume(required_volume)
+                            
+                            print(f"\n      🔍 Validating risk for calculated volume...")
+                            print(f"      💰 Martingale Maximum Risk: ${stats['martingale_maximum_risk']:.2f}")
+                            
+                            if risk_for_required is not None:
+                                print(f"      💰 RISK CALCULATION:")
+                                print(f"        • Calculated risk for {required_volume} lots: ${risk_for_required:.2f}")
+                                
+                                if risk_for_required <= stats['martingale_maximum_risk']:
+                                    print(f"        ✅ RISK CHECK PASSED")
+                                    safe_volume = required_volume
+                                    risk_check_passed = True
+                                    risk_exceeded = False
+                                    
+                                    stats["order_risk_validation"][recovery_symbol] = {
+                                        "symbol": recovery_symbol,
+                                        "total_loss_amount": symbol_analysis_data.get('total_loss_amount', 0),
+                                        "required_profit": required_profit_with_adder,
+                                        "calculated_volume": required_volume,
+                                        "calculated_risk": risk_for_required,
+                                        "max_allowed_risk": stats['martingale_maximum_risk'],
+                                        "price_difference": price_diff,
+                                        "contract_size": contract_size,
+                                        "risk_check_passed": True,
+                                        "safe_volume": safe_volume
+                                    }
+                                else:
+                                    print(f"        ❌ RISK CHECK FAILED")
+                                    # Binary search for safe volume
+                                    low = 0.01
+                                    high = required_volume
+                                    safe_volume = low
+                                    iterations = 0
+                                    
+                                    while iterations < 20 and (high - low) > 0.001:
+                                        mid = (low + high) / 2
+                                        mid_risk = calculate_profit_for_volume(mid)
+                                        
+                                        if mid_risk is None:
+                                            break
+                                        
+                                        if mid_risk <= stats['martingale_maximum_risk']:
+                                            safe_volume = mid
+                                            low = mid
+                                        else:
+                                            high = mid
+                                        
+                                        iterations += 1
+                                    
+                                    safe_volume = max(0.01, round(safe_volume, 2))
+                                    safe_risk = calculate_profit_for_volume(safe_volume)
+                                    
+                                    print(f"        🔧 Adjusted to safe volume: {safe_volume} lots")
+                                    print(f"        • Risk at safe volume: ${safe_risk:.2f}")
+                                    
+                                    risk_check_passed = True
+                                    risk_exceeded = True
+                                    
+                                    stats["order_risk_validation"][recovery_symbol] = {
+                                        "symbol": recovery_symbol,
+                                        "total_loss_amount": symbol_analysis_data.get('total_loss_amount', 0),
+                                        "required_profit": required_profit_with_adder,
+                                        "calculated_volume": required_volume,
+                                        "calculated_risk": risk_for_required,
+                                        "safe_volume": safe_volume,
+                                        "safe_risk": safe_risk,
+                                        "max_allowed_risk": stats['martingale_maximum_risk'],
+                                        "risk_check_passed": False,
+                                        "risk_exceeded": True
+                                    }
+                            else:
+                                print(f"      ⚠️  Could not calculate risk")
+                                risk_check_passed = False
+                        else:
+                            print(f"      ⚠️  Could not calculate profit")
+                            risk_check_passed = False
+                        
+                        # Modify signals.json for this specific symbol if needed
+                        if risk_check_passed and safe_volume > 0 and safe_volume >= 0.01:
+                            # Get original volume for comparison
+                            original_volume = sample_order.get('volume', 0)
+                            
+                            if abs(safe_volume - original_volume) < 0.001:
+                                print(f"      ℹ️  Calculated volume ({safe_volume} lots) is same as original for {recovery_symbol}")
+                                modifications_made.append({
+                                    "symbol": recovery_symbol,
+                                    "modified": False,
+                                    "old_volume": original_volume,
+                                    "new_volume": safe_volume
+                                })
+                            else:
+                                # Update orders for this specific symbol only in signals.json
+                                orders_modified = 0
+                                
+                                for category_name, category_data in signals_data.get('categories', {}).items():
+                                    symbols_in_category = category_data.get('symbols', {})
+                                    
+                                    if recovery_symbol in symbols_in_category:
+                                        symbol_signals = symbols_in_category[recovery_symbol]
+                                        
+                                        if 'bid_orders' in symbol_signals:
+                                            for order in symbol_signals['bid_orders']:
+                                                old_volume = order.get('volume', 0)
+                                                if abs(old_volume - safe_volume) > 0.001:
+                                                    order['volume'] = safe_volume
+                                                    orders_modified += 1
+                                                    print(f"        🔄 Modified {recovery_symbol} bid order in signals.json: {old_volume} → {safe_volume} lots")
+                                        
+                                        if 'ask_orders' in symbol_signals:
+                                            for order in symbol_signals['ask_orders']:
+                                                old_volume = order.get('volume', 0)
+                                                if abs(old_volume - safe_volume) > 0.001:
+                                                    order['volume'] = safe_volume
+                                                    orders_modified += 1
+                                                    print(f"        🔄 Modified {recovery_symbol} ask order in signals.json: {old_volume} → {safe_volume} lots")
+                                
+                                if orders_modified > 0:
+                                    modifications_made.append({
+                                        "symbol": recovery_symbol,
+                                        "modified": True,
+                                        "old_volume": original_volume,
+                                        "new_volume": safe_volume,
+                                        "orders_modified": orders_modified
+                                    })
+                                    print(f"\n      ✅ Modified {orders_modified} orders in signals.json for {recovery_symbol} to volume: {safe_volume} lots")
+                    
+                    # Save signals.json if any modifications were made
+                    if modifications_made and any(mod.get('modified', False) for mod in modifications_made):
+                        with open(signals_path, 'w', encoding='utf-8') as f:
+                            json.dump(signals_data, f, indent=2, ensure_ascii=False)
+                        
+                        stats["signals_modified"] = True
+                        print(f"\n      ✅ Saved signals.json with {len([m for m in modifications_made if m.get('modified')])} symbols modified")
+                    else:
+                        stats["signals_modified"] = False
+                        if modifications_made:
+                            print(f"\n      ℹ️  No volume changes needed for any symbols")
+                        else:
+                            print(f"\n      ℹ️  No modifications made")
+                    
+                except Exception as e:
+                    print(f"      ❌ Error: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    stats["errors"] += 1
+                    stats["signals_modified"] = False
+        else:
+            if stats.get('pre_scaling_applied'):
+                print(f"\n  └─ ℹ️  All symbols with losses were handled by PRE-SCALING. Skipping signals.json modification.")
+            elif any(analysis.get("required_profit_with_adder", 0) > 0 for analysis in symbol_analysis.values()):
+                print(f"\n  └─ ℹ️  Symbols with losses were handled by PRE-SCALING. Skipping signals.json modification.")
+            else:
+                print(f"\n  └─ ℹ️  No symbols need loss recovery")
+        
+        stats["investors_processed"] += 1
+        stats["processing_success"] = True
+
+    # --- FINAL SUMMARY ---
+    print(f"\n{'='*10} 📊 MARTINGALE STATUS SUMMARY {'='*10}")
+    print(f"   Investor ID: {stats['investor_id']}")
+    print(f"   Investors processed: {stats['investors_processed']}")
+    print(f"   Martingale Enabled: {'✅ YES' if stats['martingale_enabled'] else '❌ NO'}")
+    
+    if stats['martingale_enabled']:
+        print(f"   Maximum Lookback: {stats['maximum_martingale_lookback']} losses")
+        print(f"   Martingale Maximum Risk: ${stats['martingale_maximum_risk']:.2f}")
+        print(f"   Loss Recovery Adder: {stats['martingale_loss_recovery_adder_percentage']}%")
+        print(f"   Sync to Pending Orders: {'✅ ENABLED' if stats['martingale_for_position_order_scale'] else '❌ DISABLED'}")
+        print(f"   PRE-SCALING: {'✅ ENABLED' if stats['martingale_pre_scaling'] else '❌ DISABLED'}")
+        print(f"   Has Daily Loss: {'✅ YES' if stats['has_loss'] else '❌ NO'}")
+        
+        if stats.get('pre_scaling_applied'):
+            print(f"\n   🎯 PRE-SCALING APPLIED (Modified pending orders):")
+            for symbol, details in stats['pre_scaling_details'].items():
+                if details.get('has_pre_scaling'):
+                    print(f"      🔹 {symbol}:")
+                    print(f"         • Position expected loss: ${details['expected_loss']:.2f}")
+                    if details.get('old_order_ticket'):
+                        print(f"         • Old order ticket: {details['old_order_ticket']}")
+                    if details.get('new_order_ticket'):
+                        print(f"         • New order ticket: {details['new_order_ticket']}")
+                    print(f"         • Volume: {details['old_volume']} → {details['new_volume']} lots")
+                    print(f"         • Total to recover: ${details['total_to_recover']:.2f}")
+                    print(f"         • Method: {details.get('method', 'unknown')}")
+                    print(f"         • Status: {'✅ SUCCESS' if details.get('success') else '❌ FAILED'}")
+        
+        if stats.get('symbol_analysis'):
+            print(f"\n   📊 Symbol-Specific Martingale Analysis:")
+            for symbol, analysis in stats['symbol_analysis'].items():
+                if analysis.get('required_profit_with_adder', 0) > 0 and not analysis.get('handled_by_pre_scaling', False):
+                    print(f"\n      🔹 {symbol}:")
+                    print(f"         • Losses in lookback: {analysis['losses_in_lookback']}")
+                    print(f"         • Total loss amount: ${analysis['total_loss_amount']:.2f}")
+                    print(f"         • Required profit (base): ${analysis['required_profit']:.2f}")
+                    print(f"         • Required profit (with adder): ${analysis['required_profit_with_adder']:.2f}")
+        
+        print(f"\n   🎰 Martingale Volume Adjustment:")
+        if stats.get('symbols_with_loss'):
+            if stats.get('pre_scaling_applied'):
+                handled_by_pre_scaling = [s for s, d in stats['pre_scaling_details'].items() if d.get('has_pre_scaling')]
+                print(f"      • Handled by PRE-SCALING: {', '.join(handled_by_pre_scaling)}")
+                if stats['symbols_with_loss']:
+                    print(f"      • Signals.json modified for: {', '.join(stats['symbols_with_loss'])}")
+                else:
+                    print(f"      • No signals.json modifications needed")
+            else:
+                print(f"      • Symbols requiring recovery: {', '.join(stats['symbols_with_loss'])}")
+        
+        if stats.get('signals_modified'):
+            print(f"      • Signals.json modified: ✅ YES")
+        elif stats.get('pre_scaling_applied'):
+            print(f"      • Signals.json modified:  NO (handled by pre-scaling)")
+        else:
+            print(f"      • Signals.json modified:  NO")
+        
+        if stats.get('pending_orders_modified'):
+            print(f"      • Pending orders modified: ✅ YES (pre-scaling)")
         
         if stats.get('order_risk_validation'):
             print(f"\n   💰 Volume Calculations:")
@@ -13540,7 +14911,7 @@ def place_instant_stop_orders(inv_id=None):
     
     return stats
 
-def process_single_investor(inv_folder):
+def process_single_invest(inv_folder):
     """
     WORKER FUNCTION: Handles the entire pipeline for ONE investor.
     Sequential execution without console output.
@@ -13605,7 +14976,7 @@ def process_single_investor(inv_folder):
         #timeframe_countdown(inv_id=inv_id)
 
         # STEP 0: SYMBOL AUTHORIZATION FILTER
-        symbols_grid_prices(inv_id=inv_id)
+        martingale(inv_id=inv_id)
         
         
         mt5.shutdown()
@@ -13619,7 +14990,7 @@ def process_single_investor(inv_folder):
     
     return account_stats
 
-def process_single_invest(inv_folder):
+def process_single_investor(inv_folder):
     """
     WORKER FUNCTION: Handles the entire pipeline for ONE investor.
     Sequential execution without console output.
