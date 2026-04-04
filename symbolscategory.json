@@ -1,55 +1,5 @@
 {
-  "indices": [
-    "US TECH 100",
-    "Wall Street 30"
-  ],
-  "commodities": [],
-  "synthetics": [ ],
-  "crypto": [
-    "BTCUSD",
-    "ETHUSD"
-  ],
   "forex": [
-    "AUDNZD",
-    "AUDCAD",
-    "AUDCHF",
-    "AUDJPY",
-    "AUDUSD",
-    "CADCHF",
-    "CADJPY",
-    "CHFJPY",
-    "EURAUD",
-    "EURCAD",
-    "EURCHF",
-    "EURGBP",
-    "EURJPY",
-    "EURNZD",
-    "EURUSD",
-    "GBPCAD",
-    "GBPCHF",
-    "GBPJPY",
-    "GBPNZD",
-    "GBPUSD",
-    "NZDCAD",
-    "NZDJPY",
-    "NZDUSD",
-    "USDCAD",
-    "USDCHF",
-    "USDJPY",
-    "GBPAUD"
-  ],
-  "energies": [
-    "US Oil"
-  ],
-  "basket_indices": [
-    "AUD Basket",
-    "EUR Basket",
-    "GBP Basket",
-    "AUD_Basket",
-    "EUR_Basket",
-    "GBP_Basket"
-  ],
-  "metals": [
-    "XAUUSD"
+    "GBPUSD"
   ]
 }

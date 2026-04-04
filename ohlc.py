@@ -8,57 +8,50 @@ import json
 from PIL import Image
 import numpy as np
 import matplotlib.pyplot as plt
-import cv2
 from pathlib import Path
 from datetime import datetime
-import calculateprices
 import time
-import threading
+from datetime import timedelta
 import traceback
+import shutil
+from datetime import datetime
+import multiprocessing
+import json
+import time
+import MetaTrader5 as mt5
+import pandas as pd
+import mplfinance as mpf
+from datetime import datetime
+from PIL import Image
+import numpy as np
+import matplotlib.pyplot as plt
+from pathlib import Path
+from datetime import datetime
 from datetime import timedelta
 import traceback
 import shutil
 from datetime import datetime
 import re
-import placeorders
-import insiders_server
-import timeorders
-import concurrent.futures
-import multiprocessing
+from pathlib import Path
+import math
+import pytz
+import multiprocessing as mp
+from pathlib import Path
+import time
+import random
 
-
-
-def load_developers_dictionary():
-    BROKERS_JSON_PATH = r"C:\xampp\htdocs\chronedge\synarex\ohlc.json"
-    """Load brokers config from JSON file with error handling and fallback."""
-    if not os.path.exists(BROKERS_JSON_PATH):
-        print(f"CRITICAL: {BROKERS_JSON_PATH} NOT FOUND! Using empty config.", "CRITICAL")
-        return {}
-
-    try:
-        with open(BROKERS_JSON_PATH, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        
-        # Optional: Convert numeric strings back to int where needed
-        for user_brokerid, cfg in data.items():
-            if "LOGIN_ID" in cfg and isinstance(cfg["LOGIN_ID"], str):
-                cfg["LOGIN_ID"] = cfg["LOGIN_ID"].strip()
-            if "RISKREWARD" in cfg and isinstance(cfg["RISKREWARD"], (str, float)):
-                cfg["RISKREWARD"] = int(cfg["RISKREWARD"])
-        
-        return data
-
-    except json.JSONDecodeError as e:
-        print(f"Invalid JSON in ohlc.json: {e}", "CRITICAL")
-        return {}
-    except Exception as e:
-        print(f"Failed to load ohlc.json: {e}", "CRITICAL")
-        return {}
-ohlcdictionary = load_developers_dictionary()
-
-
-BASE_ERROR_FOLDER = r"C:\xampp\htdocs\chronedge\synarex\usersdata\debugs"
+INV_PATH = r"C:\xampp\htdocs\synapse\synarex\usersdata\investors"
+UPDATED_INVESTORS = r"C:\xampp\htdocs\synapse\synarex\updated_investors.json"
+INVESTOR_USERS = r"C:\xampp\htdocs\synapse\synarex\usersdata\investors\investors.json"
+VERIFIED_INVESTORS = r"C:\xampp\htdocs\synapse\synarex\verified_investors.json"
+ISSUES_INVESTORS = r"C:\xampp\htdocs\synapse\synarex\issues_investors.json"
+NORMALIZE_SYMBOLS_PATH = r"C:\xampp\htdocs\synapse\synarex\symbols_normalization.json"
+DEFAULT_ACCOUNTMANAGEMENT = r"C:\xampp\htdocs\synapse\synarex\default_accountmanagement.json"
+DEFAULT_PATH = r"C:\xampp\htdocs\synapse\synarex"
+NORM_FILE_PATH = Path(DEFAULT_PATH) / "symbols_normalization.json"
+BASE_ERROR_FOLDER = r"C:\xampp\htdocs\synapse\synarex\usersdata\debugs"
 TIMEFRAME_MAP = {
+    "1m": mt5.TIMEFRAME_M1,
     "5m": mt5.TIMEFRAME_M5,
     "15m": mt5.TIMEFRAME_M15,
     "30m": mt5.TIMEFRAME_M30,
@@ -66,21 +59,169 @@ TIMEFRAME_MAP = {
     "4h": mt5.TIMEFRAME_H4
 }
 ERROR_JSON_PATH = os.path.join(BASE_ERROR_FOLDER, "chart_errors.json")
-           
-def log_and_print(message, level="INFO"):
-    """Log and print messages in a structured format."""
-    timestamp = datetime.now(pytz.timezone('Africa/Lagos')).strftime('%Y-%m-%d %H:%M:%S')
-    print(f"[{timestamp}] {level:8} | {message}")
 
+def load_investor_users():
+    """Load investor users config from JSON file."""
+    INVESTOR_USERS_PATH = r"C:\xampp\htdocs\synapse\synarex\usersdata\investors\investors.json"
+    
+    if not os.path.exists(INVESTOR_USERS_PATH):
+        print(f"CRITICAL: {INVESTOR_USERS_PATH} NOT FOUND! Using empty config.", "CRITICAL")
+        return {}
+
+    try:
+        with open(INVESTOR_USERS_PATH, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        # Convert numeric strings back to int where needed
+        for investor_id, cfg in data.items():
+            if "LOGIN_ID" in cfg and isinstance(cfg["LOGIN_ID"], str):
+                cfg["LOGIN_ID"] = cfg["LOGIN_ID"].strip()
+            
+            # Extract target folder from INVESTED_WITH (text after underscore)
+            if "INVESTED_WITH" in cfg:
+                invested_with = cfg["INVESTED_WITH"]
+                if "_" in invested_with:
+                    # Get the part after underscore (e.g., "prices" from "bybit1_prices")
+                    target_folder = invested_with.split("_", 1)[1]
+                    cfg["TARGET_FOLDER"] = target_folder
+                else:
+                    # If no underscore, use the whole string
+                    cfg["TARGET_FOLDER"] = invested_with
+                    print(f"Warning: No underscore found in INVESTED_WITH '{invested_with}' for investor {investor_id}, using whole string", "WARNING")
+        
+        return data
+
+    except json.JSONDecodeError as e:
+        print(f"Invalid JSON in investors.json: {e}", "CRITICAL")
+        return {}
+    except Exception as e:
+        print(f"Failed to load investors.json: {e}", "CRITICAL")
+        return {}
+investor_users = load_investor_users()
+
+def load_accountmanagement(investor_id):
+    """Load account management config for a specific investor."""
+    accountmanagement_path = os.path.join(INV_PATH, investor_id, "accountmanagement.json")
+    
+    if not os.path.exists(accountmanagement_path):
+        print(f"  ⚠️  Investor {investor_id} | accountmanagement.json not found", "WARNING")
+        return None, None
+    
+    try:
+        with open(accountmanagement_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        # Extract bars value if present
+        bars = data.get("bars")
+        if bars is None:
+            print(f"  ⚠️  Investor {investor_id} | 'bars' not defined in accountmanagement.json", "WARNING")
+            return None, None
+        
+        # Validate bars is a positive integer
+        if not isinstance(bars, int) or bars <= 0:
+            print(f"  ⚠️  Investor {investor_id} | 'bars' must be a positive integer, got: {bars}", "WARNING")
+            return None, None
+        
+        # Extract timeframe list (dynamic)
+        timeframes = data.get("timeframe")
+        if timeframes is None:
+            print(f"  ⚠️  Investor {investor_id} | 'timeframe' not defined in accountmanagement.json", "WARNING")
+            return None, None
+        
+        # Validate timeframe is a list
+        if not isinstance(timeframes, list):
+            print(f"  ⚠️  Investor {investor_id} | 'timeframe' must be a list, got: {type(timeframes)}", "WARNING")
+            return None, None
+        
+        # Validate each timeframe is supported
+        valid_timeframes = []
+        for tf in timeframes:
+            if tf in TIMEFRAME_MAP:
+                valid_timeframes.append(tf)
+            else:
+                print(f"  ⚠️  Investor {investor_id} | Unsupported timeframe '{tf}', skipping", "WARNING")
+        
+        if not valid_timeframes:
+            print(f"  ❌  Investor {investor_id} | No valid timeframes provided", "ERROR")
+            return None, None
+        
+        print(f"  📊  Investor {investor_id} | Using bars={bars}, timeframes={valid_timeframes}", "INFO")
+        return bars, valid_timeframes
+        
+    except json.JSONDecodeError as e:
+        print(f"  ❌  Investor {investor_id} | Invalid JSON in accountmanagement.json: {e}", "ERROR")
+        return None, None
+    except Exception as e:
+        print(f"  ❌  Investor {investor_id} | Failed to load accountmanagement.json: {e}", "ERROR")
+        return None, None
+
+def load_investor_symbols(investor_id):
+    """
+    Load symbols from accountmanagement.json for a specific investor.
+    Format expected:
+    {
+        "timeframe": ["1m", "5m"],
+        "bars": 500,
+        "symbols_dictionary": {
+            "xxxjpy": ["symbol1", "symbol2"],
+            "xxxusd": ["GBPUSD+", "EURUSD+"],
+            # Ignore the key (xxxjpy/xxxusd), just extract all values from the arrays
+        }
+    }
+    """
+    accountmanagement_path = os.path.join(INV_PATH, investor_id, "accountmanagement.json")
+    
+    if not os.path.exists(accountmanagement_path):
+        print(f"  ⚠️  Investor {investor_id} | accountmanagement.json not found", "WARNING")
+        return []
+    
+    try:
+        with open(accountmanagement_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        # Extract symbols from symbols_dictionary
+        symbols_dict = data.get("symbols_dictionary", {})
+        
+        if not symbols_dict:
+            print(f"  ⚠️  Investor {investor_id} | No symbols_dictionary found in accountmanagement.json", "WARNING")
+            return []
+        
+        # Collect all symbols from all arrays in the dictionary
+        all_symbols = []
+        for category, symbol_list in symbols_dict.items():
+            if isinstance(symbol_list, list):
+                all_symbols.extend(symbol_list)
+            elif isinstance(symbol_list, str):
+                # If it's a string instead of list, add as single item
+                all_symbols.append(symbol_list)
+        
+        # Remove duplicates while preserving order
+        unique_symbols = []
+        seen = set()
+        for symbol in all_symbols:
+            if symbol not in seen:
+                unique_symbols.append(symbol)
+                seen.add(symbol)
+        
+        print(f"  📊  Investor {investor_id} | Loaded {len(unique_symbols)} symbols from accountmanagement.json", "INFO")
+        return unique_symbols
+        
+    except json.JSONDecodeError as e:
+        print(f"  ❌  Investor {investor_id} | Invalid JSON in accountmanagement.json: {e}", "ERROR")
+        return []
+    except Exception as e:
+        print(f"  ❌  Investor {investor_id} | Failed to load symbols from accountmanagement.json: {e}", "ERROR")
+        return []
+    
 def save_errors(error_log):
     """Save error log to JSON file."""
     try:
         os.makedirs(BASE_ERROR_FOLDER, exist_ok=True)
         with open(ERROR_JSON_PATH, 'w') as f:
             json.dump(error_log, f, indent=4)
-        log_and_print("Error log saved", "ERROR")
+        print("Error log saved", "ERROR")
     except Exception as e:
-        log_and_print(f"Failed to save error log: {str(e)}", "ERROR")
+        print(f"Failed to save error log: {str(e)}", "ERROR")
 
 def initialize_mt5(terminal_path, login_id, password, server):
     """Initialize MetaTrader 5 terminal for a specific broker."""
@@ -92,7 +233,7 @@ def initialize_mt5(terminal_path, login_id, password, server):
             "broker": server
         })
         save_errors(error_log)
-        log_and_print(f"MT5 terminal executable not found: {terminal_path}", "ERROR")
+        print(f"MT5 terminal executable not found: {terminal_path}", "ERROR")
         return False, error_log
 
     try:
@@ -109,7 +250,7 @@ def initialize_mt5(terminal_path, login_id, password, server):
                 "broker": server
             })
             save_errors(error_log)
-            log_and_print(f"Failed to initialize MT5: {mt5.last_error()}", "ERROR")
+            print(f"Failed to initialize MT5: {mt5.last_error()}", "ERROR")
             return False, error_log
 
         if not mt5.login(login=int(login_id), server=server, password=password):
@@ -119,11 +260,10 @@ def initialize_mt5(terminal_path, login_id, password, server):
                 "broker": server
             })
             save_errors(error_log)
-            log_and_print(f"Failed to login to MT5: {mt5.last_error()}", "ERROR")
+            print(f"Failed to login to MT5: {mt5.last_error()}", "ERROR")
             mt5.shutdown()
             return False, error_log
 
-        log_and_print(f"MT5 initialized and logged in successfully (loginid={login_id}, server={server})", "SUCCESS")
         return True, error_log
     except Exception as e:
         error_log.append({
@@ -132,7 +272,7 @@ def initialize_mt5(terminal_path, login_id, password, server):
             "broker": server
         })
         save_errors(error_log)
-        log_and_print(f"Unexpected error in initialize_mt5: {str(e)}", "ERROR")
+        print(f"Unexpected error in initialize_mt5: {str(e)}", "ERROR")
         return False, error_log
 
 def get_symbols():
@@ -146,70 +286,16 @@ def get_symbols():
             "broker": mt5.terminal_info().name if mt5.terminal_info() else "unknown"
         })
         save_errors(error_log)
-        log_and_print(f"Failed to retrieve symbols: {mt5.last_error()}", "ERROR")
+        print(f"Failed to retrieve symbols: {mt5.last_error()}", "ERROR")
         return [], error_log
 
     available_symbols = [s.name for s in symbols]
-    log_and_print(f"Retrieved {len(available_symbols)} symbols", "INFO")
+    print(f"Retrieved {len(available_symbols)} symbols", "INFO")
     return available_symbols, error_log
-
-def identifyparenthighsandlows(df, neighborcandles_left, neighborcandles_right):
-    """Identify Parent Highs (PH) and Parent Lows (PL) based on neighbor candles."""
-    error_log = []
-    ph_indices = []
-    pl_indices = []
-    ph_labels = []
-    pl_labels = []
-
-    try:
-        for i in range(len(df)):
-            if i >= len(df) - neighborcandles_right:
-                continue
-
-            current_high = df.iloc[i]['high']
-            current_low = df.iloc[i]['low']
-            right_highs = df.iloc[i + 1:i + neighborcandles_right + 1]['high']
-            right_lows = df.iloc[i + 1:i + neighborcandles_right + 1]['low']
-            left_highs = df.iloc[max(0, i - neighborcandles_left):i]['high']
-            left_lows = df.iloc[max(0, i - neighborcandles_left):i]['low']
-
-            if len(right_highs) == neighborcandles_right:
-                is_ph = True
-                if len(left_highs) > 0:
-                    is_ph = current_high > left_highs.max()
-                is_ph = is_ph and current_high > right_highs.max()
-                if is_ph:
-                    ph_indices.append(df.index[i])
-                    ph_labels.append(('PH', current_high, df.index[i]))
-
-            if len(right_lows) == neighborcandles_right:
-                is_pl = True
-                if len(left_lows) > 0:
-                    is_pl = current_low < left_lows.min()
-                is_pl = is_pl and current_low < right_lows.min()
-                if is_pl:
-                    pl_indices.append(df.index[i])
-                    pl_labels.append(('PL', current_low, df.index[i]))
-
-        log_and_print(f"Identified {len(ph_indices)} PH and {len(pl_indices)} PL for {df['symbol'].iloc[0]}", "INFO")
-        return ph_labels, pl_labels, error_log
-    except Exception as e:
-        error_log.append({
-            "timestamp": datetime.now(pytz.timezone('Africa/Lagos')).strftime('%Y-%m-%d %H:%M:%S.%f+01:00'),
-            "error": f"Failed to identify PH/PL: {str(e)}",
-            "broker": mt5.terminal_info().name if mt5.terminal_info() else "unknown"
-        })
-        save_errors(error_log)
-        log_and_print(f"Failed to identify PH/PL: {str(e)}", "ERROR")
-        return [], [], error_log
-
 
 def fetch_ohlcv_data(symbol, mt5_timeframe, bars):
     """
-    Fetch OHLCV data for a given symbol and timeframe with detailed diagnostics.
-    
-    Returns:
-        df (pd.DataFrame or None), error_log (list of dicts)
+    Fetch OHLCV data including the currently forming candle (index 0).
     """
     error_log = []
     lagos_tz = pytz.timezone('Africa/Lagos')
@@ -217,518 +303,62 @@ def fetch_ohlcv_data(symbol, mt5_timeframe, bars):
 
     broker_name = mt5.terminal_info().name if mt5.terminal_info() else "unknown"
 
-    # --- Step 1: Ensure symbol is selected (with retry) ---
+    # --- Step 1: Ensure symbol is selected ---
     selected = False
     for attempt in range(3):
         if mt5.symbol_select(symbol, True):
             selected = True
             break
-        time.sleep(0.5)  # small delay before retry
+        time.sleep(0.5)
 
     if not selected:
         last_err = mt5.last_error()
-        err_msg = f"FAILED symbol_select('{symbol}') after 3 attempts: {last_err}"
-        log_and_print(err_msg, "ERROR")
-        error_log.append({
-            "timestamp": timestamp,
-            "symbol": symbol,
-            "timeframe": mt5_timeframe,
-            "requested_bars": bars,
-            "error": err_msg,
-            "broker": broker_name
-        })
-        save_errors(error_log)
-        return None, error_log
+        err_msg = f"FAILED symbol_select('{symbol}'): {last_err}"
+        print(err_msg, "ERROR")
+        return None, [{"error": err_msg, "timestamp": timestamp}]
 
-    # --- Step 2: Try to copy rates ---
+    # --- Step 2: Fetch rates ---
+    # Position 0 is the current forming candle. 
+    # This fetches 'bars' number of candles ending at the current live one.
     rates = mt5.copy_rates_from_pos(symbol, mt5_timeframe, 0, bars)
 
-    if rates is None:
+    if rates is None or len(rates) == 0:
         last_err = mt5.last_error()
-        err_msg = f"copy_rates_from_pos returned None for {symbol} (TF: {mt5_timeframe}): {last_err}"
-        log_and_print(err_msg, "ERROR")
-        error_log.append({
-            "timestamp": timestamp,
-            "symbol": symbol,
-            "timeframe": mt5_timeframe,
-            "requested_bars": bars,
-            "error": err_msg,
-            "broker": broker_name
-        })
-        save_errors(error_log)
-        return None, error_log
+        err_msg = f"No data for {symbol}: {last_err}"
+        print(err_msg, "ERROR")
+        return None, [{"error": err_msg, "timestamp": timestamp}]
 
     available_bars = len(rates)
-    if available_bars == 0:
-        err_msg = f"NO historical data available for {symbol} on this timeframe (requested {bars} bars, got 0)"
-        log_and_print(err_msg, "WARNING")
-        error_log.append({
-            "timestamp": timestamp,
-            "symbol": symbol,
-            "timeframe": mt5_timeframe,
-            "requested_bars": bars,
-            "available_bars": 0,
-            "error": "No bars returned (likely broker limitation on higher timeframes)",
-            "broker": broker_name
-        })
-        save_errors(error_log)
-        return None, error_log
-
-    # --- Success path ---
-    if available_bars < bars:
-        log_msg = (f"Partial data: {symbol} → requested {bars} bars, "
-                   f"but only {available_bars} available (common on higher TFs like 1h/4h)")
-        log_and_print(log_msg, "WARNING")
-    else:
-        log_and_print(f"Fetched {available_bars} bars for {symbol}", "INFO")
-
+    
     # Convert to DataFrame
     df = pd.DataFrame(rates)
     df["time"] = pd.to_datetime(df["time"], unit="s")
     df = df.set_index("time")
 
-    # Clean and standardize dtypes
+    # Standardize dtypes
     df = df.astype({
-        "open": float,
-        "high": float,
-        "low": float,
-        "close": float,
-        "tick_volume": float,
-        "spread": int,
-        "real_volume": float
+        "open": float, "high": float, "low": float, "close": float,
+        "tick_volume": float, "spread": int, "real_volume": float
     })
     df.rename(columns={"tick_volume": "volume"}, inplace=True)
 
+    print(f"Fetched {available_bars} bars (including live candle) for {symbol}", "INFO")
     return df, error_log
 
-def save_newest_oldest_df(df, symbol, timeframe_str, timeframe_folder):
-    """Save candles: oldest → newest, candle_number 0 = oldest. Fixed filenames."""
-    error_log = []
-    
-    target_subfolder = os.path.join(timeframe_folder, "candlesdetails")
-    os.makedirs(target_subfolder, exist_ok=True)
-    
-    all_json_path = os.path.join(target_subfolder, "newest_oldest.json")
-    latest_json_path = os.path.join(target_subfolder, "latest_completed_candle.json")
-    
-    lagos_tz = pytz.timezone('Africa/Lagos')
-    now = datetime.now(lagos_tz)
-
-    try:
-        if len(df) < 2:
-            error_msg = f"Not enough data for {symbol} ({timeframe_str})"
-            log_and_print(error_msg, "ERROR")
-            error_log.append({"error": error_msg, "timestamp": now.isoformat()})
-            save_errors(error_log)
-            return error_log
-
-        all_candles = []
-        for i, (ts, row) in enumerate(df.iterrows()):
-            candle = row.to_dict()
-            candle.update({
-                "time": ts.strftime('%Y-%m-%d %H:%M:%S'),
-                "candle_number": i,
-                "symbol": symbol,
-                "timeframe": timeframe_str
-            })
-            all_candles.append(candle)
-
-        with open(all_json_path, 'w', encoding='utf-8') as f:
-            json.dump(all_candles, f, indent=4)
-
-        # Latest completed candle: second from end (-2)
-        previous_latest_candle = all_candles[-2].copy()
-        candle_time = lagos_tz.localize(datetime.strptime(previous_latest_candle["time"], '%Y-%m-%d %H:%M:%S'))
-        delta = now - candle_time
-        total_hours = delta.total_seconds() / 3600
-        age_str = f"{int(total_hours)}h old" if total_hours <= 24 else f"{int(total_hours // 24)}d old"
-
-        previous_latest_candle.update({"age": age_str, "id": "x"})
-        if "candle_number" in previous_latest_candle:
-            del previous_latest_candle["candle_number"]
-
-        with open(latest_json_path, 'w', encoding='utf-8') as f:
-            json.dump(previous_latest_candle, f, indent=4)
-
-        log_and_print(f"SAVED: newest_oldest.json for {symbol} {timeframe_str}", "SUCCESS")
-
-    except Exception as e:
-        err = f"save_newest_oldest_df failed: {str(e)}"
-        log_and_print(err, "ERROR")
-        error_log.append({"error": err, "timestamp": now.isoformat()})
-        save_errors(error_log)
-
-    return error_log
-
-def generate_and_save_chart_df(df, symbol, timeframe_str, timeframe_folder):
-    """Generate and save only the basic full chart. Sliced charts have been removed."""
-    error_log = []
-    
-    chart_path = os.path.join(timeframe_folder, "chart.png")
-    
-    try:
-        custom_style = mpf.make_mpf_style(
-            base_mpl_style="default",
-            marketcolors=mpf.make_marketcolors(
-                up="green", down="red", edge="inherit",
-                wick={"up": "green", "down": "red"}, volume="gray"
-            )
-        )
-
-        # Generate and save only the full chart
-        fig, axlist = mpf.plot(
-            df, 
-            type='candle', 
-            style=custom_style, 
-            volume=False,
-            title=f"{symbol} ({timeframe_str})", 
-            returnfig=True,
-            warn_too_much_data=5000
-        )
-        
-        fig.set_size_inches(25, 10)
-        for ax in axlist:
-            ax.grid(False)
-            for line in ax.get_lines():
-                if line.get_label() == '':
-                    line.set_linewidth(0.5)
-
-        fig.savefig(chart_path, bbox_inches="tight", dpi=200)
-        plt.close(fig)
-
-        log_and_print(f"SAVED: chart.png for {symbol} {timeframe_str}", "SUCCESS")
-
-        return chart_path, error_log
-
-    except Exception as e:
-        log_and_print(f"Error in chart generation: {e}", "ERROR")
-        error_log.append(str(e))
-        return None, error_log
-        
-def generate_and_save_chart(symbol, timeframe_str, timeframe_folder):
-    """Generate sliced charts + return list of slice counts actually generated"""
-    error_log = []
-
-    target_subfolder = os.path.join(timeframe_folder, "candlesdetails")
-    json_path = os.path.join(target_subfolder, "newest_oldest.json")
-
-    candle_slices = [301]
-
-    generated_slice_counts = []  # To pass to JSON slicers
-
-    try:
-        if not os.path.exists(json_path):
-            err = f"JSON file not found: {json_path}"
-            log_and_print(err, "ERROR")
-            error_log.append({"error": err})
-            return [], error_log
-
-        with open(json_path, 'r', encoding='utf-8') as f:
-            all_candles = json.load(f)
-
-        if len(all_candles) < 11:
-            err = f"Not enough candles in JSON (need at least 11) for {symbol} {timeframe_str}"
-            log_and_print(err, "WARNING")
-            return [], error_log
-
-        df = pd.DataFrame(all_candles)
-        df["time"] = pd.to_datetime(df["time"])
-        df = df.set_index("time")
-        df = df[["open", "high", "low", "close", "volume"]]
-        df = df.astype(float)
-        df = df.sort_index()
-
-        custom_style = mpf.make_mpf_style(
-            base_mpl_style="default",
-            marketcolors=mpf.make_marketcolors(
-                up="green", down="red", edge="inherit",
-                wick={"up": "green", "down": "red"}, volume="gray"
-            )
-        )
-
-        generated_slices = 0
-        for count in candle_slices:
-            if len(df) >= count:
-                df_slice = df.iloc[-count:]
-                slice_path = os.path.join(timeframe_folder, f"chart_{count}.png")
-
-                fig, axlist = mpf.plot(
-                    df_slice,
-                    type='candle',
-                    style=custom_style,
-                    title=f"{symbol} ({timeframe_str}) - Last {count}",
-                    returnfig=True,
-                    warn_too_much_data=5000
-                )
-
-                fig.set_size_inches(25, 10)
-                for ax in axlist:
-                    ax.grid(False)
-                    for line in ax.get_lines():
-                        if line.get_label() == '':
-                            line.set_linewidth(0.5)
-
-                fig.savefig(slice_path, bbox_inches="tight", dpi=100)
-                plt.close(fig)
-
-                generated_slice_counts.append(count)
-                generated_slices += 1
-
-        log_and_print(f"SAVED: {generated_slices} sliced charts (from JSON) for {symbol} {timeframe_str}", "SUCCESS")
-        return generated_slice_counts, error_log
-
-    except Exception as e:
-        log_and_print(f"Error in sliced chart generation (from JSON): {e}", "ERROR")
-        error_log.append({"error": str(e)})
-        return [], error_log
-    
-def save_sliced_newest_oldest_json(symbol, timeframe_str, timeframe_folder, slice_counts):
-    """Save sliced versions: oldest → newest (candle_number 0 = oldest) from full newest_oldest.json"""
-    error_log = []
-
-    target_subfolder = os.path.join(timeframe_folder, "candlesdetails")
-    full_json_path = os.path.join(target_subfolder, "newest_oldest.json")
-
-    lagos_tz = pytz.timezone('Africa/Lagos')
-    now = datetime.now(lagos_tz)
-
-    try:
-        if not os.path.exists(full_json_path):
-            err = f"Full JSON not found for slicing: {full_json_path}"
-            log_and_print(err, "ERROR")
-            error_log.append({"error": err})
-            return error_log
-
-        with open(full_json_path, 'r', encoding='utf-8') as f:
-            all_candles = json.load(f)
-
-        if len(all_candles) < 11:
-            return error_log  # Not enough for smallest slice
-
-        generated = 0
-        for count in slice_counts:
-            if len(all_candles) < count:
-                continue
-
-            # Slice: last `count` candles → most recent
-            sliced_candles = all_candles[-count:]
-
-            # Full sliced JSON: oldest → newest in this slice
-            reordered = []
-            for i, candle in enumerate(sliced_candles):
-                c = candle.copy()
-                c["candle_number"] = i  # 0 = oldest in slice
-                reordered.append(c)
-
-            slice_json_path = os.path.join(target_subfolder, f"new_old_{count}.json")
-            with open(slice_json_path, 'w', encoding='utf-8') as f:
-                json.dump(reordered, f, indent=4)
-
-            # Latest completed candle in this slice: second from end (-2)
-            if len(reordered) >= 2:
-                prev_candle = reordered[-2].copy()
-                candle_time = lagos_tz.localize(datetime.strptime(prev_candle["time"], '%Y-%m-%d %H:%M:%S'))
-                delta = now - candle_time
-                total_hours = delta.total_seconds() / 3600
-                age_str = f"{int(total_hours)}h old" if total_hours <= 24 else f"{int(total_hours // 24)}d old"
-                prev_candle.update({"age": age_str, "id": "x"})
-                if "candle_number" in prev_candle:
-                    del prev_candle["candle_number"]
-
-                latest_slice_path = os.path.join(target_subfolder, f"latest_completed_candle.json")
-                with open(latest_slice_path, 'w', encoding='utf-8') as f:
-                    json.dump(prev_candle, f, indent=4)
-
-            generated += 1
-
-        if generated > 0:
-            log_and_print(f"SAVED: {generated} sliced new_old_*.json + latest_completed for {symbol} {timeframe_str}", "SUCCESS")
-
-    except Exception as e:
-        err = f"save_sliced_newest_oldest_json failed: {str(e)}"
-        log_and_print(err, "ERROR")
-        error_log.append({"error": err, "timestamp": now.isoformat()})
-
-    return error_log
-
-def ticks_value(symbol, symbol_folder, user_brokerid, base_folder, all_symbols):
-    error_log = []
-    
-    # Strip numbers from broker ID (e.g., "deriv6" -> "deriv")
-    cleaned_broker = ''.join([char for char in user_brokerid if not char.isdigit()])
-    
-    # Individual file path
-    safe_symbol = symbol.replace('/', '_').replace(' ', '_').upper()  # Safer: also handle spaces
-    output_json_filename = f"{safe_symbol}_ticks.json"
-    output_json_path = os.path.join(symbol_folder, output_json_filename)
-    
-    # Combined file path
-    combined_path = r"C:\xampp\htdocs\chronedge\synarex\usersdata\symbolstick\symbolstick.json"
-    
-    # Default values
-    tick_size = None
-    tick_value = None
-    
-    try:
-        # Get broker config and initialize MT5
-        config = ohlcdictionary.get(user_brokerid)
-        if not config:
-            raise Exception(f"No configuration found for broker '{user_brokerid}' in ohlcdictionary")
-        
-        success, init_errors = initialize_mt5(
-            config["TERMINAL_PATH"],
-            config["LOGIN_ID"],
-            config["PASSWORD"],
-            config["SERVER"]
-        )
-        error_log.extend(init_errors)
-        
-        if not success:
-            raise Exception("MT5 initialization failed")
-        
-        # Retrieve symbol info
-        sym_info = mt5.symbol_info(symbol)
-        if sym_info is None:
-            raise Exception(f"Symbol '{symbol}' not found or not available in MT5 terminal")
-        
-        tick_size = sym_info.point               # Minimum price increment
-        tick_value = sym_info.trade_tick_value   # Value of one tick per standard lot
-        
-        log_and_print(
-            f"[{user_brokerid}] Retrieved for {symbol}: tick_size={tick_size}, tick_value={tick_value}",
-            "SUCCESS"
-        )
-        
-        # Always shutdown MT5 connection
-        mt5.shutdown()
-        
-    except Exception as e:
-        error_msg = f"Failed to retrieve tick info for {symbol} ({user_brokerid}): {str(e)}"
-        error_log.append({
-            "timestamp": datetime.now(pytz.timezone('Africa/Lagos')).strftime('%Y-%m-%d %H:%M:%S.%f+01:00'),
-            "error": error_msg,
-            "broker": user_brokerid
-        })
-        log_and_print(error_msg, "ERROR")
-    
-    # Data to save - using cleaned broker name (e.g., "deriv" instead of "deriv6")
-    output_data = {
-        "market": symbol,
-        "broker": cleaned_broker,        # <-- Cleaned version here
-        "tick_size": tick_size,
-        "tick_value": tick_value
-    }
-    
-    # 1. Save individual symbol JSON
-    try:
-        with open(output_json_path, 'w', encoding='utf-8') as f:
-            json.dump(output_data, f, indent=4)
-        log_and_print(f"Saved tick info to {output_json_path}", "SUCCESS")
-    except Exception as e:
-        error_log.append({
-            "timestamp": datetime.now(pytz.timezone('Africa/Lagos')).strftime('%Y-%m-%d %H:%M:%S.%f+01:00'),
-            "error": f"Failed to write {output_json_path}: {str(e)}",
-            "broker": user_brokerid
-        })
-        log_and_print(f"Failed to save individual JSON: {str(e)}", "ERROR")
-    
-    # 2. Update the combined symbolstick.json
-    combined_data = {}
-    file_exists = os.path.exists(combined_path)
-    
-    if file_exists:
-        try:
-            with open(combined_path, 'r', encoding='utf-8') as f:
-                combined_data = json.load(f)
-        except Exception as e:
-            error_log.append({
-                "timestamp": datetime.now(pytz.timezone('Africa/Lagos')).strftime('%Y-%m-%d %H:%M:%S.%f+01:00'),
-                "error": f"Failed to read combined JSON: {str(e)}",
-                "broker": user_brokerid
-            })
-            log_and_print(f"Failed to read combined JSON: {str(e)}", "ERROR")
-            combined_data = {}
-    
-    # Create the new entry with cleaned broker
-    entry = {
-        "market": symbol,
-        "broker": cleaned_broker,
-        "tick_size": tick_size,
-        "tick_value": tick_value
-    }
-    
-    previous_entry = combined_data.get(safe_symbol)
-    
-    # Only write if new symbol or values have changed
-    if previous_entry != entry:
-        combined_data[safe_symbol] = entry
-        
-        try:
-            # Ensure directory exists
-            os.makedirs(os.path.dirname(combined_path), exist_ok=True)
-            
-            with open(combined_path, 'w', encoding='utf-8') as f:
-                json.dump(combined_data, f, indent=4)
-            
-            action = "Updated" if previous_entry is not None else "Added"
-            log_and_print(f"{action} {safe_symbol} (broker: {cleaned_broker}) in combined symbolstick.json", "SUCCESS")
-        except Exception as e:
-            error_log.append({
-                "timestamp": datetime.now(pytz.timezone('Africa/Lagos')).strftime('%Y-%m-%d %H:%M:%S.%f+01:00'),
-                "error": f"Failed to write combined JSON: {str(e)}",
-                "broker": user_brokerid
-            })
-            log_and_print(f"Failed to save combined JSON: {str(e)}", "ERROR")
-    
-    # Save any errors
-    if error_log:
-        save_errors(error_log)
-    
-    return error_log
-
-def crop_chart(chart_path, symbol, timeframe_str, timeframe_folder):
-    """Crop all charts in the folder including slices (chart_XX.png) and analyzed versions."""
-    error_log = []
-    
-    # List of all images to crop: the main ones and all the slices
-    images_to_crop = [f for f in os.listdir(timeframe_folder) if f.endswith(".png") and "chart" in f]
-
-    try:
-        for filename in images_to_crop:
-            full_path = os.path.join(timeframe_folder, filename)
-            with Image.open(full_path) as img:
-                # Set your crop margins here if needed (currently 0)
-                left, top, right, bottom = 0, 0, 0, 0 
-                crop_box = (left, top, img.width - right, img.height - bottom)
-                cropped_img = img.crop(crop_box)
-                cropped_img.save(full_path, "PNG")
-        
-        log_and_print(f"All {len(images_to_crop)} charts cropped for {symbol} ({timeframe_str})", "SUCCESS")
-
-    except Exception as e:
-        err_msg = f"Failed to crop charts: {str(e)}"
-        log_and_print(err_msg, "ERROR")
-        error_log.append({"error": err_msg})
-
-    return error_log
-
-def backup_developers_dictionary():
-    main_path = Path(r"C:\xampp\htdocs\chronedge\synarex\ohlc.json")
-    backup_path = Path(r"C:\xampp\htdocs\chronedge\synarex\ohlcbackup.json")
+def backup_investor_users():
+    """Backup investor users configuration."""
+    main_path = Path(r"C:\xampp\htdocs\synapse\synarex\usersdata\investors\investors.json")
+    backup_path = Path(r"C:\xampp\htdocs\synapse\synarex\investors_backup.json")
     
     main_path.parent.mkdir(parents=True, exist_ok=True)
     backup_path.parent.mkdir(parents=True, exist_ok=True)
     
-    print(f"Main file   : {main_path}")
-    print(f"Backup file : {backup_path}")
-
     def read_json_safe(path: Path) -> dict | None:
         if not path.exists() or path.stat().st_size == 0:
             return None
         try:
             with open(path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            # {} is considered EMPTY, not valid data
             if data == {}:
                 return None
             return data
@@ -739,33 +369,27 @@ def backup_developers_dictionary():
         with open(path, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
 
-    # Step 1: Check main file
     main_data = read_json_safe(main_path)
     
     if main_data is not None:
-        # Main has real data → copy to backup (and make backup pretty)
-        print("Main has valid data → syncing to backup")
+        print("Main investor file has valid data → syncing to backup")
         write_json(backup_path, main_data)
-        print(f"Copied valid data: {main_path} → {backup_path}")
         return
 
-    # Step 2: Main is empty {} or invalid → check backup
-    print("Main is empty or invalid → checking backup")
+    print("Main investor file is empty or invalid → checking backup")
     backup_data = read_json_safe(backup_path)
 
     if backup_data is not None:
-        # Backup has real data → restore to main
         print("Backup has valid data → restoring to main")
         write_json(main_path, backup_data)
         print(f"Restored: {backup_path} → {main_path}")
         return
 
-    # Step 3: Both are empty or invalid → create clean empty files
     print("Both files empty or corrupted → initializing clean empty state")
     empty_dict = {}
     write_json(main_path, empty_dict)
     write_json(backup_path, empty_dict)
-    print("Created fresh empty ohlc.json and backup") 
+    print("Created fresh empty investors.json and backup")
 
 def clear_chart_folder(base_folder: str):
     """Delete ONLY symbols that have NO valid OB-none-OI record on 15m-4h."""
@@ -773,7 +397,7 @@ def clear_chart_folder(base_folder: str):
     IMPORTANT_TFS = {"15m", "30m", "1h", "4h"}
 
     if not os.path.exists(base_folder):
-        log_and_print(f"Chart folder {base_folder} does not exist – nothing to clear.", "INFO")
+        print(f"Chart folder {base_folder} does not exist – nothing to clear.", "INFO")
         return True, error_log
 
     deleted = 0
@@ -807,11 +431,11 @@ def clear_chart_folder(base_folder: str):
         try:
             if keep_symbol:
                 kept += 1
-                log_and_print(f"KEEP   {item_path} (has 15m-4h OB-none-OI)", "INFO")
+                print(f"KEEP   {item_path} (has 15m-4h OB-none-OI)", "INFO")
             else:
                 shutil.rmtree(item_path)
                 deleted += 1
-                log_and_print(f"DELETE {item_path} (no 15m-4h record)", "INFO")
+                print(f"DELETE {item_path} (no 15m-4h record)", "INFO")
         except Exception as e:
             error_log.append({
                 "timestamp": datetime.now(pytz.timezone('Africa/Lagos')).strftime(
@@ -819,67 +443,47 @@ def clear_chart_folder(base_folder: str):
                 "error": f"Failed to handle {item_path}: {str(e)}",
                 "broker": base_folder
             })
-            log_and_print(f"Failed to handle {item_path}: {str(e)}", "ERROR")
+            print(f"Failed to handle {item_path}: {str(e)}", "ERROR")
 
-    log_and_print(
+    print(
         f"Smart clean finished → {deleted} folders deleted, {kept} folders kept.",
         "SUCCESS")
     return True, error_log
 
-def clear_unknown_broker():
-    base_path = r"C:\xampp\htdocs\chronedge\synarex\usersdata"
+def clear_unknown_investors():
+    """Clear unknown investor folders."""
+    base_path = INV_PATH
     
     if not os.path.exists(base_path):
         print(f"ERROR: Base directory does not exist:\n    {base_path}")
         return
     
-    if not ohlcdictionary:
-        print("No brokers found in ohlcdictionary.")
+    if not investor_users:
+        print("No investors found in investors.json.")
         return
 
-    print("Configured Brokers & Folder Check (Human-readable folders):")
+    print("Configured Investors & Folder Check:")
     print("=" * 90)
     
-    configured_displays = set()
-    known_broker_bases = set()
-    broker_details = []
+    configured_ids = set()
+    investor_details = []
     existing = 0
     missing = 0
     
-    def format_user_brokerid(name):
-        name = name.strip()
-        match = re.match(r"([a-zA-Z_]+)(\d*)$", name, re.IGNORECASE)
-        if not match:
-            return name.capitalize()
-        base, num = match.groups()
-        base_clean = base.capitalize()
-        if num:
-            known_broker_bases.add(base_clean)
-            return f"{base_clean} {int(num)}"
-        known_broker_bases.add(base_clean)
-        return base_clean
-
-    # ——— Scan configured brokers ———
-    for user_brokerid in ohlcdictionary.keys():
-        original = user_brokerid.strip()
-        display_name = format_user_brokerid(original)
-        lower_display = display_name.lower()
+    for investor_id in investor_users.keys():
+        configured_ids.add(investor_id)
         
-        configured_displays.add(lower_display)
-        
-        folder_path = os.path.join(base_path, display_name)
+        folder_path = os.path.join(base_path, investor_id)
         exists = os.path.isdir(folder_path)
         
         marker = "Success" if exists else "Error"
         status = "EXISTS" if exists else "MISSING"
         
-        print(f"{marker} {original.ljust(25)} → {display_name.ljust(20)} → {status}")
+        print(f"{marker} Investor {investor_id.ljust(25)} → {status}")
         print(f"    Path: {folder_path}\n")
         
-        broker_details.append({
-            'original': original,
-            'display': display_name,
-            'lower': lower_display,
+        investor_details.append({
+            'id': investor_id,
             'path': folder_path,
             'exists': exists
         })
@@ -888,19 +492,10 @@ def clear_unknown_broker():
         else: missing += 1
     
     print("=" * 90)
-    print(f"Total configured: {len(ohlcdictionary)} broker(s) | {existing} folder(s) exist | {missing} missing")
+    print(f"Total configured: {len(investor_users)} investor(s) | {existing} folder(s) exist | {missing} missing")
 
-    # ——— Unique broker types ———
-    print("\nUnique Configured Broker Types:")
-    print("-" * 60)
-    for base in sorted(known_broker_bases):
-        instances = [b['display'] for b in broker_details if b['display'].startswith(base)]
-        print(f"• {base.ljust(15)} → {len(instances)} account(s): {', '.join(instances)}")
-    print("-" * 60)
-    print(f"Unique broker types: {len(known_broker_bases)}")
-
-    # ——— AUTO-DELETE ORPHANED FOLDERS (NO CONFIRMATION) ———
-    print("\nCleaning Orphaned Broker Folders (AUTO-DELETE enabled)...")
+    # Auto-delete orphaned folders
+    print("\nCleaning Orphaned Investor Folders (AUTO-DELETE enabled)...")
     print("-" * 70)
     
     if not os.path.isdir(base_path):
@@ -910,191 +505,485 @@ def clear_unknown_broker():
         all_folders = [f for f in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, f))]
         
         for folder in all_folders:
-            folder_lower = folder.lower()
-            full_path = os.path.join(base_path, folder)
-            
-            if folder_lower in configured_displays:
-                continue
-                
-            suspected_base = None
-            for base in known_broker_bases:
-                if folder_lower.startswith(base.lower()):
-                    suspected_base = base
-                    break
-            
-            if suspected_base:
-                orphaned.append((folder, full_path, suspected_base))
+            folder_path = os.path.join(base_path, folder)
+            if folder not in configured_ids:
+                orphaned.append((folder, folder_path))
         
         if orphaned:
-            print(f"Deleting {len(orphaned)} orphaned broker folder(s):")
+            print(f"Deleting {len(orphaned)} orphaned investor folder(s):")
             deleted_count = 0
-            for folder, full_path, base in orphaned:
+            for folder, folder_path in orphaned:
                 try:
-                    shutil.rmtree(full_path)
-                    print(f"  Deleted: {folder}  (was {base})")
+                    shutil.rmtree(folder_path)
+                    print(f"  Deleted: {folder}")
                     deleted_count += 1
                 except Exception as e:
                     print(f"  Failed to delete {folder}: {e}")
             print(f"\nAuto-clean complete: {deleted_count}/{len(orphaned)} orphaned folders removed.")
         else:
-            print("No orphaned broker folders found. Directory is clean!")
+            print("No orphaned investor folders found. Directory is clean!")
 
     print("-" * 70)
     
     if missing > 0:
-        print(f"\nReminder: {missing} configured broker(s) missing their folder!")
-        print("   Expected format: Deriv 2, Bybit 6, Exness 1, etc.")
+        print(f"\nReminder: {missing} configured investor(s) missing their folder!")
 
-def fetch_charts_all_brokers(bars):
-    # ------------------------------------------------------------------
-    # PATHS
-    # ------------------------------------------------------------------
-    backup_developers_dictionary()
-    category_path = r"C:\xampp\htdocs\synapse\synarex\symbolscategory.json"
-
-    # ------------------------------------------------------------------
-    # HELPERS
-    # ------------------------------------------------------------------
-    def normalize_broker_key(name: str) -> str:
-        return re.sub(r'\d+', '', re.sub(r'[\/\s\-_]+', '', name.strip())).lower()
-
-    def mark_chosen_broker(original_broker_key: str, user_brokerid: str, balance: float):
-        target_dir = fr"C:\xampp\htdocs\synapse\synarex\usersdata\symbols_calculated_prices\{original_broker_key}"
-        os.makedirs(target_dir, exist_ok=True)
-        chosen_path = os.path.join(target_dir, "chosenbroker.json")
-        chosen_data = {
-            "chosen": True,
-            "broker_display_name": user_brokerid,
-            "balance": round(balance, 2),
-            "selected_at": time.strftime("%Y-%m-%d %H:%M:%S")
-        }
-        try:
-            with open(chosen_path, "w", encoding="utf-8") as f:
-                json.dump(chosen_data, f, indent=4)
-        except Exception as e:
-            log_and_print(f"FAILED to write chosenbroker.json: {e}", "ERROR")
-
-    # ------------------------------------------------------------------
-    # SINGLE EXECUTION RUN
-    # ------------------------------------------------------------------
-    log_and_print("\n=== STARTING SINGLE PROCESSING RUN ===", "INFO")
+def save_newest_oldest_df(df, symbol, timeframe_str, base_output_dir):
+    """
+    Save candles directly to base directory with filename: {symbol}_{timeframe}_candledetails.json
+    Format: oldest (index 0) → newest (index n-1)
+    """
+    error_log = []
+    
+    # Create filename with symbol and timeframe
+    filename = f"{symbol}_{timeframe_str}_candledetails.json"
+    file_path = os.path.join(base_output_dir, filename)
+    
+    lagos_tz = pytz.timezone('Africa/Lagos')
+    now = datetime.now(lagos_tz)
 
     try:
-        # 1. LOAD CATEGORIES & SYMBOLS
-        if not os.path.exists(category_path):
-            log_and_print(f"CRITICAL: {category_path} not found!", "CRITICAL")
-            return False
+        if len(df) < 2:
+            error_msg = f"Not enough data for {symbol} ({timeframe_str})"
+            print(error_msg, "ERROR")
+            error_log.append({"error": error_msg, "timestamp": now.isoformat()})
+            save_errors(error_log)
+            return error_log
 
-        with open(category_path, "r", encoding="utf-8") as f:
-            categories_data = json.load(f)
+        # Prepare all candles (oldest first, newest last)
+        all_candles = []
+        for i, (ts, row) in enumerate(df.iterrows()):
+            candle = row.to_dict()
+            candle.update({
+                "time": ts.strftime('%Y-%m-%d %H:%M:%S'),
+                "candle_number": i,  # 0 = oldest
+                "symbol": symbol,
+                "timeframe": timeframe_str
+            })
+            all_candles.append(candle)
 
-        # 2. SELECT BEST BROKER INSTANCE
-        selected_brokers = {} 
-        for original_key, cfg in ohlcdictionary.items():
-            user_brokerid = cfg.get("original_name", original_key)
-            norm_key = normalize_broker_key(user_brokerid)
+        # Save all candles to single JSON file
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(all_candles, f, indent=4)
 
-            balance = 0.0
-            ok, _ = initialize_mt5(cfg["TERMINAL_PATH"], cfg["LOGIN_ID"], cfg["PASSWORD"], cfg["SERVER"])
-            if ok:
-                account_info = mt5.account_info()
-                if account_info: 
-                    balance = account_info.balance
-                mt5.shutdown()
-
-            if norm_key not in selected_brokers or balance > selected_brokers[norm_key][2]:
-                selected_brokers[norm_key] = (user_brokerid, cfg, balance, original_key)
-
-        unique_brokers = {}
-        for norm_key, (user_id, cfg, bal, orig_key) in selected_brokers.items():
-            unique_brokers[user_id] = cfg
-            mark_chosen_broker(orig_key, user_id, bal)
-
-        # 3. BUILD CANDIDATE QUEUE
-        candidates = {bn: {cat: [] for cat in categories_data.keys()} for bn in unique_brokers}
-        total_to_do = 0
-
-        for bn, cfg in unique_brokers.items():
-            ok, _ = initialize_mt5(cfg["TERMINAL_PATH"], cfg["LOGIN_ID"], cfg["PASSWORD"], cfg["SERVER"])
-            if not ok: continue
-            
-            mt5_available, _ = get_symbols() 
-            mt5.shutdown()
-
-            for cat, symbol_list in categories_data.items():
-                for sym in symbol_list:
-                    if sym in mt5_available:
-                        candidates[bn][cat].append(sym)
-                        total_to_do += 1
-
-        if total_to_do == 0:
-            log_and_print("No matching symbols found in any broker.", "WARNING")
-            return True # Finished, even if there was nothing to do
-
-        log_and_print(f"TOTAL TO PROCESS: {total_to_do}", "SUCCESS")
-
-        # 4. ROUND-ROBIN PROCESSING
-        remaining = {b: {c: candidates[b][c][:] for c in categories_data.keys()} for b in unique_brokers}
+        # Also save latest completed candle separately (for quick access)
         
-        while any(any(remaining[b][c]) for b in unique_brokers for c in categories_data.keys()):
-            for cat in categories_data.keys():
-                for bn, cfg in unique_brokers.items():
-                    if not remaining[bn][cat]: continue
+        # Latest completed candle is the last one (index -1)
+        latest_candle = all_candles[-1].copy()
+        candle_time = lagos_tz.localize(datetime.strptime(latest_candle["time"], '%Y-%m-%d %H:%M:%S'))
+        delta = now - candle_time
+        total_hours = delta.total_seconds() / 3600
+        age_str = f"{int(total_hours)}h old" if total_hours <= 24 else f"{int(total_hours // 24)}d old"
 
-                    symbol = remaining[bn][cat].pop(0)
+        latest_candle.update({"age": age_str, "id": "x"})
+        if "candle_number" in latest_candle:
+            del latest_candle["candle_number"]
 
-                    ok, _ = initialize_mt5(cfg["TERMINAL_PATH"], cfg["LOGIN_ID"], cfg["PASSWORD"], cfg["SERVER"])
-                    if not ok: continue
+        
 
-                    log_and_print(f"PROCESSING {symbol} ({cat}) on {bn.upper()}", "INFO")
-                    sym_folder = os.path.join(cfg["BASE_FOLDER"], symbol.replace(" ", "_"))
-                    os.makedirs(sym_folder, exist_ok=True)
-
-                    for tf_str, mt5_tf in TIMEFRAME_MAP.items():
-                        tf_folder = os.path.join(sym_folder, tf_str)
-                        os.makedirs(tf_folder, exist_ok=True)
-
-                        df, _ = fetch_ohlcv_data(symbol, mt5_tf, bars)
-                        if df is not None and not df.empty:
-                            df["symbol"] = symbol
-                            save_newest_oldest_df(df, symbol, tf_str, tf_folder)
-                            chart_path, _ = generate_and_save_chart_df(df, symbol, tf_str, tf_folder)
-                            slice_counts, _ = generate_and_save_chart(symbol, tf_str, tf_folder)
-                            if slice_counts:
-                                save_sliced_newest_oldest_json(symbol, tf_str, tf_folder, slice_counts)
-                            if chart_path:
-                                crop_chart(chart_path, symbol, tf_str, tf_folder)
-                    
-                    ticks_value(symbol, sym_folder, bn, cfg["BASE_FOLDER"], candidates[bn][cat])
-                    mt5.shutdown()
-
-        log_and_print("RUN COMPLETED SUCCESSFULLY", "SUCCESS")
-        return True # Return True so the main script knows we are done
+        print(f"✓ {symbol} {timeframe_str} | JSON saved to {filename} | {len(all_candles)} candles", "SUCCESS")
 
     except Exception as e:
-        log_and_print(f"PROCESS FAILED: {e}", "CRITICAL")
-        return False
-    finally:
-        # Final safety shutdown to ensure terminal isn't locked
-        try:
-            mt5.shutdown()
-        except:
-            pass
- 
-def main():
-    success = fetch_charts_all_brokers(
-        bars=2001
-    )
+        err = f"save_newest_oldest_df failed: {str(e)}"
+        print(err, "ERROR")
+        error_log.append({"error": err, "timestamp": now.isoformat()})
+        save_errors(error_log)
 
-    if success:
-        log_and_print("Chart generation, cropping, arrow detection, PH/PL analysis, and candle data saving completed successfully for all brokers!", "SUCCESS")
-    else:
-        log_and_print("Process failed. Check error log for details.", "ERROR")   
+    return error_log
 
-if __name__ == "__main__":
-    main()
+def generate_and_save_chart_df(df, symbol, timeframe_str, base_output_dir):
+    """Generate and save chart with filename: {symbol}_{timeframe}_chart.png directly in base directory."""
+    error_log = []
     
+    # Create filename with symbol and timeframe
+    filename = f"{symbol}_{timeframe_str}_chart.png"
+    chart_path = os.path.join(base_output_dir, filename)
+    
+    try:
+        # Dynamic width calculation
+        num_candles = len(df)
+        
+        # Configuration for readable candles
+        MIN_CANDLE_WIDTH = 20
+        MAX_CANDLE_WIDTH = 40
+        MIN_CANDLE_SPACING = 10
+        BASE_HEIGHT = 100
+        MAX_IMAGE_WIDTH = 90000000
+        
+        # Determine optimal candle width based on number of candles
+        if num_candles <= 50:
+            base_candle_width = 30
+            base_spacing_multiplier = 1.8
+        elif num_candles <= 200:
+            base_candle_width = 20
+            base_spacing_multiplier = 1.6
+        elif num_candles <= 1000:
+            base_candle_width = 12
+            base_spacing_multiplier = 1.4
+        else:
+            base_candle_width = MIN_CANDLE_WIDTH
+            base_spacing_multiplier = 1.3
+        
+        # Apply constraints to candle width
+        target_candle_width = max(base_candle_width, MIN_CANDLE_WIDTH)
+        target_candle_width = min(target_candle_width, MAX_CANDLE_WIDTH)
+        
+        # Calculate spacing based on candle width and multiplier
+        desired_spacing = target_candle_width * base_spacing_multiplier
+        actual_spacing = max(desired_spacing, MIN_CANDLE_SPACING)
+        
+        # Calculate total width needed in pixels
+        if num_candles > 1:
+            total_width_pixels = actual_spacing * (num_candles - 1) + target_candle_width
+        else:
+            total_width_pixels = target_candle_width * 2
+        
+        # Add padding for margins
+        padding_pixels = 200
+        img_width_pixels = int(total_width_pixels + padding_pixels)
+        img_width_pixels = min(img_width_pixels, MAX_IMAGE_WIDTH)
+        
+        min_width_pixels = 800
+        if img_width_pixels < min_width_pixels:
+            img_width_pixels = min_width_pixels
+        
+        # Convert pixels to inches for matplotlib
+        img_width_inches = img_width_pixels / 100
+        
+        print(f"📊 {symbol} {timeframe_str} | {num_candles} candles → {img_width_pixels}px", "INFO")
+        
+        # Chart style
+        custom_style = mpf.make_mpf_style(
+            base_mpl_style="default",
+            marketcolors=mpf.make_marketcolors(
+                up="green", down="red", edge="inherit",
+                wick={"up": "green", "down": "red"}, volume="gray"
+            )
+        )
 
+        # Check DataFrame columns
+        required_cols = ['Open', 'High', 'Low', 'Close']
+        df_cols = df.columns.tolist()
+        
+        col_mapping = {}
+        for req_col in required_cols:
+            found = False
+            for df_col in df_cols:
+                if df_col.lower() == req_col.lower():
+                    col_mapping[req_col] = df_col
+                    found = True
+                    break
+            if not found:
+                raise KeyError(f"Required column '{req_col}' not found. Available: {df_cols}")
+        
+        if col_mapping:
+            df_plot = df.rename(columns={v: k for k, v in col_mapping.items()})
+        else:
+            df_plot = df
+
+        # Generate and save chart
+        fig, axlist = mpf.plot(
+            df_plot, 
+            type='candle', 
+            style=custom_style, 
+            volume=False,
+            title=f"{symbol} ({timeframe_str}) - {num_candles} candles", 
+            returnfig=True,
+            warn_too_much_data=5000,
+            figsize=(img_width_inches, BASE_HEIGHT),
+            scale_padding={'left': 0.5, 'right': 1.5, 'top': 0.5, 'bottom': 0.5}
+        )
+        
+        fig.set_size_inches(img_width_inches, BASE_HEIGHT)
+        
+        for ax in axlist:
+            ax.grid(False)
+            for line in ax.get_lines():
+                if line.get_label() == '':
+                    line.set_linewidth(0.5)
+
+        fig.savefig(chart_path, bbox_inches="tight", dpi=100)
+        plt.close(fig)
+
+        print(f"✓ {symbol} {timeframe_str} | Chart saved to {filename} | {num_candles} candles", "SUCCESS")
+        return chart_path, error_log
+
+    except KeyError as e:
+        print(f"Error in chart generation - column error: {e}", "ERROR")
+        error_log.append(str(e))
+        return None, error_log
+    except Exception as e:
+        print(f"Error in chart generation: {e}", "ERROR")
+        error_log.append(str(e))
+        return None, error_log
+
+def fetch_charts_all_brokers_old():
+    """Fetch charts for all investors using their individual symbol lists from accountmanagement.json."""
+    backup_investor_users()
+
+    print("\n" + "╔" + "═"*58 + "╗", "INFO")
+    print("║           🚀 MULTI-INVESTOR SYNCHRONIZATION ENGINE           ║", "INFO")
+    print("╚" + "═"*58 + "╝\n", "INFO")
+
+    try:
+        # 1. First, initialize MT5 with first investor to check available symbols on server
+        print("📡 Discovering available symbols on MT5 server...", "INFO")
+        
+        first_cfg = list(investor_users.values())[0]
+        mt5_available = []
+        
+        ok, _ = initialize_mt5(first_cfg["TERMINAL_PATH"], first_cfg["LOGIN_ID"], first_cfg["PASSWORD"], first_cfg["SERVER"])
+        if ok:
+            mt5_available, _ = get_symbols()
+            mt5.shutdown()
+            print(f"✅ Found {len(mt5_available)} symbols available on MT5 server", "SUCCESS")
+        else:
+            print("⚠️  Could not connect to MT5 to check available symbols. Will attempt per-investor connections.", "WARNING")
+
+        # 2. Build workload for each investor from their own accountmanagement.json
+        investors = list(investor_users.items())
+        
+        print("\n" + "─"*60, "INFO")
+        print("📋 WORKLOAD DISTRIBUTION (Per Investor Symbol Lists)", "INFO")
+        print("─"*60, "INFO")
+        
+        investor_symbols_map = {}
+        total_symbols_all = 0
+        
+        for investor_id, investor_cfg in investors:
+            # Load symbols from this investor's accountmanagement.json
+            symbol_list = load_investor_symbols(investor_id)
+            
+            # Validate symbols against MT5 availability (if we have the list)
+            if mt5_available:
+                valid_symbols = [sym for sym in symbol_list if sym in mt5_available]
+                invalid_count = len(symbol_list) - len(valid_symbols)
+                if invalid_count > 0:
+                    print(f"   Investor {investor_id:18} | {len(valid_symbols)} valid / {len(symbol_list)} total symbols (⚠️ {invalid_count} invalid)", "WARNING")
+                symbol_list = valid_symbols
+            else:
+                print(f"   Investor {investor_id:18} | {len(symbol_list)} symbols (⚠️ skipping MT5 validation)", "INFO")
+            
+            if symbol_list:
+                investor_symbols_map[investor_id] = symbol_list
+                total_symbols_all += len(symbol_list)
+                bar = "█" * min(20, int((len(symbol_list) / max(1, len(symbol_list))) * 20))
+                print(f"   Investor {investor_id:18} | {bar:20} | {len(symbol_list):3} symbols", "SUCCESS")
+            else:
+                print(f"   Investor {investor_id:18} | {'⚠️ NO SYMBOLS LOADED':30}", "WARNING")
+        
+        if total_symbols_all == 0:
+            print("\n⚠️  No symbols found to process for any investor.", "WARNING")
+            return True
+        
+        print("─"*60 + "\n", "INFO")
+        print(f"🚀 Launching {len(investor_symbols_map)} parallel processes...\n", "INFO")
+
+        # 3. Launch Processes
+        manager = multiprocessing.Manager()
+        final_counts = manager.dict()
+        processes = []
+
+        for investor_id, symbol_list in investor_symbols_map.items():
+            investor_cfg = investor_users.get(investor_id)
+            if not investor_cfg:
+                continue
+                
+            p = multiprocessing.Process(
+                target=process_account_worker,  # New version of worker
+                args=(investor_id, investor_cfg, symbol_list, TIMEFRAME_MAP, final_counts)
+            )
+            processes.append(p)
+            p.start()
+
+        # Wait for all investors to finish their work
+        for p in processes:
+            p.join()
+
+        # 4. Final Summary
+        total_processed = sum(final_counts.values())
+        
+        print("\n" + "╔" + "═"*58 + "╗", "SUCCESS")
+        print("║                    🏁 PROCESSING COMPLETE                    ║", "SUCCESS")
+        print("╠" + "═"*58 + "╣", "SUCCESS")
+        
+        for investor_id, count in final_counts.items():
+            total_for_investor = len(investor_symbols_map.get(investor_id, []))
+            percentage = (count / total_for_investor) * 100 if total_for_investor > 0 else 0
+            print(f"║ Investor {investor_id:26} │ {count:3}/{total_for_investor:3} symbols │ {percentage:5.1f}%", "SUCCESS")
+        
+        print("╠" + "═"*58 + "╣", "SUCCESS")
+        print(f"║ {'TOTAL':30} │ {total_processed:3}/{total_symbols_all:3} symbols │ {(total_processed/total_symbols_all)*100:5.1f}%", "SUCCESS")
+        print("╚" + "═"*58 + "╝\n", "SUCCESS")
+
+        return True
+
+    except Exception as e:
+        print("\n" + "╔" + "═"*58 + "╗", "CRITICAL")
+        print("║                    💥 SYSTEM ERROR                            ║", "CRITICAL")
+        print("╠" + "═"*58 + "╣", "CRITICAL")
+        print(f"║ {str(e):56}", "CRITICAL")
+        print("╚" + "═"*58 + "╝\n", "CRITICAL")
+        traceback.print_exc()
+        return False
+
+def process_account_worker(investor_id, symbol_list, TIMEFRAME_MAP, result_dict=None):
+    """
+    Process symbols for a single investor.
+    This function handles its own MT5 connection and shutdown.
+    No multiprocessing logic inside - just pure processing.
+    """
+    processed_count = 0
+    
+    # Get investor config
+    investor_cfg = investor_users.get(investor_id)
+    if not investor_cfg:
+        print(f"  ❌  Investor {investor_id} | Config not found", "ERROR")
+        if result_dict is not None:
+            result_dict[investor_id] = 0
+        return 0 if result_dict is None else None
+    
+    # Get target folder from INVESTED_WITH (extracted during load)
+    target_folder = investor_cfg.get("TARGET_FOLDER")
+    if not target_folder:
+        print(f"  ❌  Investor {investor_id} | SKIPPED - No TARGET_FOLDER extracted from INVESTED_WITH", "ERROR")
+        if result_dict is not None:
+            result_dict[investor_id] = 0
+        return 0 if result_dict is None else None
+    
+    # Load bars and timeframes from accountmanagement.json for this investor
+    bars, timeframes = load_accountmanagement(investor_id)
+    
+    # Skip this investor if bars or timeframes is not defined
+    if bars is None or timeframes is None:
+        print(f"  ❌  Investor {investor_id} | SKIPPED - Missing 'bars' or 'timeframe' in accountmanagement.json", "ERROR")
+        if result_dict is not None:
+            result_dict[investor_id] = 0
+        return 0 if result_dict is None else None
+    
+    if not symbol_list:
+        print(f"  ⚠️  Investor {investor_id} | No symbols to process", "WARNING")
+        if result_dict is not None:
+            result_dict[investor_id] = 0
+        return 0 if result_dict is None else None
+    
+    # Build dynamic timeframe map for this investor
+    investor_timeframe_map = {}
+    for tf in timeframes:
+        if tf in TIMEFRAME_MAP:
+            investor_timeframe_map[tf] = TIMEFRAME_MAP[tf]
+    
+    # Create base output directory: INV_PATH/{investor_id}/{target_folder}/
+    base_output_dir = os.path.join(INV_PATH, investor_id, target_folder)
+    os.makedirs(base_output_dir, exist_ok=True)
+    
+    # Log the workload for this account
+    total_in_chunk = len(symbol_list)
+    print(f"\n  ⚙️  Investor {investor_id} | Starting | {total_in_chunk} symbols | bars={bars} | timeframes={timeframes}", "INFO")
+    
+    # Initialize MT5 connection for this investor
+    ok, error_log = initialize_mt5(
+        investor_cfg["TERMINAL_PATH"], 
+        investor_cfg["LOGIN_ID"], 
+        investor_cfg["PASSWORD"], 
+        investor_cfg["SERVER"]
+    )
+    
+    if not ok:
+        print(f"  ❌  Investor {investor_id} | Failed to connect to MT5. Skipping all {total_in_chunk} symbols.", "ERROR")
+        if result_dict is not None:
+            result_dict[investor_id] = 0
+        return 0 if result_dict is None else None
+    
+    try:
+        for symbol in symbol_list:
+            try:
+                print(f"  📈 Investor {investor_id} | Processing | {symbol} | bars={bars} | timeframes={timeframes}", "INFO")
+
+                # Process only the timeframes specified in accountmanagement.json
+                for tf_str, mt5_tf in investor_timeframe_map.items():
+                    df, _ = fetch_ohlcv_data(symbol, mt5_tf, bars)
+                    if df is not None and not df.empty:
+                        df["symbol"] = symbol
+                        
+                        # Save candle details directly to base directory
+                        save_newest_oldest_df(df, symbol, tf_str, base_output_dir)
+                        
+                        # Generate and save chart directly to base directory
+                        chart_path, _ = generate_and_save_chart_df(df, symbol, tf_str, base_output_dir)
+                        
+                processed_count += 1
+                print(f"  ✅ Investor {investor_id} | Completed | {symbol}", "SUCCESS")
+                
+            except Exception as e:
+                print(f"  ❌ Investor {investor_id} | Error on {symbol}: {str(e)[:100]}", "ERROR")
+                continue
+    
+    finally:
+        mt5.shutdown()
+    
+    print(f"  🏁 Investor {investor_id} | Finished | {processed_count}/{total_in_chunk} symbols processed\n", "SUCCESS")
+    
+    if result_dict is not None:
+        result_dict[investor_id] = processed_count
+    return processed_count
+
+def fetch_charts_for_investor(investor_id):
+    """
+    Fetch charts for a single investor.
+    This is the main function to be called by process_single_investor.
+    No multiprocessing - just processes the given investor ID.
+    """
+    print(f"\n  📊 Processing charts for investor: {investor_id}", "INFO")
+    
+    try:
+        # Load symbols from this investor's accountmanagement.json
+        symbol_list = load_investor_symbols(investor_id)
+        
+        if not symbol_list:
+            print(f"  ⚠️  Investor {investor_id} | No symbols found in accountmanagement.json", "WARNING")
+            return 0
+        
+        # Check MT5 availability by trying to connect briefly
+        investor_cfg = investor_users.get(investor_id)
+        if not investor_cfg:
+            print(f"  ❌  Investor {investor_id} | Config not found", "ERROR")
+            return 0
+        
+        mt5_available = []
+        ok, _ = initialize_mt5(
+            investor_cfg["TERMINAL_PATH"], 
+            investor_cfg["LOGIN_ID"], 
+            investor_cfg["PASSWORD"], 
+            investor_cfg["SERVER"]
+        )
+        if ok:
+            mt5_available, _ = get_symbols()
+            mt5.shutdown()
+            print(f"  ✅ Found {len(mt5_available)} symbols available on MT5 server", "SUCCESS")
+            
+            # Validate symbols against MT5 availability
+            valid_symbols = [sym for sym in symbol_list if sym in mt5_available]
+            invalid_count = len(symbol_list) - len(valid_symbols)
+            if invalid_count > 0:
+                print(f"  ⚠️  Investor {investor_id} | {len(valid_symbols)} valid / {len(symbol_list)} total symbols ({invalid_count} invalid)", "WARNING")
+            symbol_list = valid_symbols
+        else:
+            print(f"  ⚠️  Investor {investor_id} | Could not connect to MT5 to check symbols, proceeding anyway", "WARNING")
+        
+        if not symbol_list:
+            print(f"  ⚠️  Investor {investor_id} | No valid symbols to process", "WARNING")
+            return 0
+        
+        # Process the symbols
+        processed_count = process_account_worker(investor_id, symbol_list, TIMEFRAME_MAP)
+        
+        return processed_count
+        
+    except Exception as e:
+        print(f"  ❌ Investor {investor_id} | Error in fetch_charts_for_investor: {str(e)}", "ERROR")
+        traceback.print_exc()
+        return 0
 
         
          
