@@ -5,12 +5,12 @@
         "login": "40940152",
         "password": "@Techknowdge12#",
         "application_status": "approved",
-        "broker_balance": 3157.62,
+        "broker_balance": 3152.52,
         "profitandloss": 0.0,
-        "contract_days_left": "42",
+        "contract_days_left": "41",
         "execution_start_date": "May 05, 2026",
-        "last_audit_timestamp": "2026-04-23T18:41:53.230567",
-        "current_balance": 3157.62,
+        "last_audit_timestamp": "2026-04-24T16:43:45.245063",
+        "current_balance": 3152.52,
         "trades": {
             "summary": {
                 "total_trades": 0,
