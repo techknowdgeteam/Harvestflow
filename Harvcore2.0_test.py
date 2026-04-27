@@ -2412,342 +2412,14 @@ def delete_all_orders_and_positions(inv_id=None):
     
     return stats
 
-def delete_midnight_orders_and_positions_old(inv_id=None):
+def disable_orders_in_restricted_timerange(inv_id=None):
     """
     Function: Deletes ALL pending orders and closes ALL open positions unconditionally
-    that were created between 9:00 PM and 12:00 AM.
-    
-    This function removes all pending orders and closes all open positions for the specified
-    investor(s) that fall within the 9:00 PM - 12:00 AM time window.
-    
-    Args:
-        inv_id: Optional specific investor ID to process. If None, processes all investors.
-        
-    Returns:
-        dict: Statistics about the deletion process
-    """
-    from datetime import datetime
-    
-    print(f"\n{'='*10} 🔥 EMERGENCY PURGE: DELETE ORDERS & POSITIONS (9:00 PM - 12:00 AM) {'='*10}")
-    print(" ⚠️  WARNING: This will remove orders/positions created between 9:00 PM and 12:00 AM!")
-    if inv_id:
-        print(f" Processing single investor: {inv_id}")
-
-    # --- TIME CHECK ---
-    current_time = datetime.now()
-    current_hour = current_time.hour
-    current_minute = current_time.minute
-    
-    # Define the time window (9:00 PM = 21:00 to 12:00 AM = 24:00/00:00)
-    WINDOW_START_HOUR = 21  # 9:00 PM
-    WINDOW_START_MINUTE = 0
-    WINDOW_END_HOUR = 23    # 11:59 PM (changing to 24:00 would be midnight)
-    WINDOW_END_MINUTE = 59
-    
-    # Check if current time is within the window
-    current_time_minutes = current_hour * 60 + current_minute
-    window_start_minutes = WINDOW_START_HOUR * 60 + WINDOW_START_MINUTE
-    window_end_minutes = WINDOW_END_HOUR * 60 + WINDOW_END_MINUTE
-    
-    is_within_window = window_start_minutes <= current_time_minutes <= window_end_minutes
-    
-    print(f" 🕐 Current time: {current_time.strftime('%H:%M:%S')}")
-    print(f" 🕘 Delete window: {WINDOW_START_HOUR:02d}:{WINDOW_START_MINUTE:02d} - {WINDOW_END_HOUR:02d}:{WINDOW_END_MINUTE:02d}")
-    
-    if not is_within_window:
-        print(f" ⛔ Outside deletion window. No orders/positions will be deleted.")
-        return {
-            "investor_id": inv_id if inv_id else "all",
-            "pending_orders_found": 0,
-            "pending_orders_deleted": 0,
-            "pending_orders_failed": 0,
-            "positions_found": 0,
-            "positions_closed": 0,
-            "positions_failed": 0,
-            "processing_success": False,
-            "time_within_window": False,
-            "current_time": current_time.strftime('%H:%M:%S'),
-            "errors": ["Outside deletion window (9:00 PM - 12:00 AM)"]
-        }
-    
-    print(" ✅ Current time is within the 9:00 PM - 12:00 AM deletion window")
-    print(" ⚠️  Proceeding with emergency purge...")
-
-    # --- DATA INITIALIZATION ---
-    stats = {
-        "investor_id": inv_id if inv_id else "all",
-        "pending_orders_found": 0,
-        "pending_orders_deleted": 0,
-        "pending_orders_failed": 0,
-        "positions_found": 0,
-        "positions_closed": 0,
-        "positions_failed": 0,
-        "processing_success": False,
-        "time_within_window": True,
-        "current_time": current_time.strftime('%H:%M:%S'),
-        "errors": []
-    }
-    
-    # Determine which investors to process
-    investors_to_process = [inv_id] if inv_id else usersdictionary.keys()
-    total_investors = len(investors_to_process) if not inv_id else 1
-    processed = 0
-
-    # Get today's date for time comparison
-    today = datetime.now().date()
-    # Define time window boundaries for comparison
-    window_start = datetime.combine(today, datetime.strptime(f"{WINDOW_START_HOUR:02d}:{WINDOW_START_MINUTE:02d}", "%H:%M").time())
-    window_end = datetime.combine(today, datetime.strptime(f"{WINDOW_END_HOUR:02d}:{WINDOW_END_MINUTE:02d}", "%H:%M").time())
-
-    for user_brokerid in investors_to_process:
-        processed += 1
-        print(f"\n[{processed}/{total_investors}] 🔥 PURGING: {user_brokerid}")
-        
-        # Get broker config
-        broker_cfg = usersdictionary.get(user_brokerid)
-        if not broker_cfg:
-            print(f"  └─  No broker config found for {user_brokerid}")
-            stats["errors"].append(f"{user_brokerid}: No broker config")
-            continue
-        
-        # --- ACCOUNT CONNECTION ---
-        print(f"  └─ 🔌 Connecting to account...")
-        
-        login_id = int(broker_cfg['LOGIN_ID'])
-        mt5_path = broker_cfg["TERMINAL_PATH"]
-        
-        # Initialize MT5 if needed
-        if not mt5.initialize(path=mt5_path):
-            print(f"  └─  MT5 initialization failed: {mt5.last_error()}")
-            stats["errors"].append(f"{user_brokerid}: MT5 init failed")
-            continue
-
-        # Check if already logged into correct account
-        acc = mt5.account_info()
-        if acc is None or acc.login != login_id:
-            print(f"  └─ 🔄 Not logged into correct account. Attempting login...")
-            if not mt5.login(login=int(login_id)):
-                print(f"  └─  Login failed: {mt5.last_error()}")
-                stats["errors"].append(f"{user_brokerid}: Login failed")
-                continue
-        
-        acc_info = mt5.account_info()
-        if not acc_info:
-            print(f"  └─  Failed to get account info")
-            stats["errors"].append(f"{user_brokerid}: Cannot fetch account info")
-            continue
-            
-        print(f"  └─ ✅ Connected to account: {acc_info.login} | Balance: ${acc_info.balance:,.2f}")
-        
-        # --- STEP 1: DELETE PENDING ORDERS CREATED IN TIME WINDOW ---
-        print(f"\n  └─ 📋 STEP 1: Deleting pending orders from 9:00 PM - 12:00 AM...")
-        pending_orders = mt5.orders_get()
-        
-        if pending_orders:
-            # Filter orders by time
-            orders_in_window = []
-            orders_outside_window = []
-            
-            for order in pending_orders:
-                # MT5 orders have a time_setup attribute (timestamp when order was placed)
-                if hasattr(order, 'time_setup') and order.time_setup > 0:
-                    order_time = datetime.fromtimestamp(order.time_setup)
-                    
-                    # Check if order time falls within the 9:00 PM - 12:00 AM window
-                    order_time_minutes = order_time.hour * 60 + order_time.minute
-                    
-                    if window_start_minutes <= order_time_minutes <= window_end_minutes:
-                        # Also check it's from today (or handle as needed)
-                        if order_time.date() == today:
-                            orders_in_window.append(order)
-                        else:
-                            orders_outside_window.append(order)
-                    else:
-                        orders_outside_window.append(order)
-                else:
-                    # If no time_setup, treat as unknown and include for safety
-                    orders_in_window.append(order)
-            
-            print(f"      • Total pending orders: {len(pending_orders)}")
-            print(f"      • Orders in deletion window: {len(orders_in_window)}")
-            print(f"      • Orders outside window (skipped): {len(orders_outside_window)}")
-            
-            stats["pending_orders_found"] = len(orders_in_window)
-            
-            if orders_in_window:
-                for order in orders_in_window:
-                    order_type_name = "ORDER"
-                    if hasattr(order, 'type'):
-                        order_type_names = {
-                            mt5.ORDER_TYPE_BUY_LIMIT: "BUY LIMIT",
-                            mt5.ORDER_TYPE_SELL_LIMIT: "SELL LIMIT",
-                            mt5.ORDER_TYPE_BUY_STOP: "BUY STOP",
-                            mt5.ORDER_TYPE_SELL_STOP: "SELL STOP",
-                            mt5.ORDER_TYPE_BUY_STOP_LIMIT: "BUY STOP-LIMIT",
-                            mt5.ORDER_TYPE_SELL_STOP_LIMIT: "SELL STOP-LIMIT"
-                        }
-                        order_type_name = order_type_names.get(order.type, f"Type {order.type}")
-                    
-                    # Get order time for display
-                    order_time_str = "Unknown"
-                    if hasattr(order, 'time_setup') and order.time_setup > 0:
-                        order_time = datetime.fromtimestamp(order.time_setup)
-                        order_time_str = order_time.strftime('%H:%M:%S')
-                    
-                    print(f"      • Deleting {order_type_name} #{order.ticket} | {order.symbol} @ {order.price_open:.5f} | Time: {order_time_str}")
-                    
-                    cancel_request = {
-                        "action": mt5.TRADE_ACTION_REMOVE,
-                        "order": order.ticket
-                    }
-                    result = mt5.order_send(cancel_request)
-                    
-                    if result and result.retcode == mt5.TRADE_RETCODE_DONE:
-                        stats["pending_orders_deleted"] += 1
-                        print(f"          ✅ Deleted successfully")
-                    else:
-                        error_msg = result.comment if result else f"Error code: {mt5.last_error()}"
-                        stats["pending_orders_failed"] += 1
-                        stats["errors"].append(f"{user_brokerid}: Failed to delete order #{order.ticket}: {error_msg}")
-                        print(f"           Delete failed: {error_msg}")
-            else:
-                print(f"      • No pending orders in the deletion window")
-        else:
-            print(f"      • No pending orders found")
-        
-        # --- STEP 2: CLOSE OPEN POSITIONS CREATED IN TIME WINDOW ---
-        print(f"\n  └─ 💼 STEP 2: Closing positions opened between 9:00 PM - 12:00 AM...")
-        positions = mt5.positions_get()
-        
-        if positions:
-            # Filter positions by time
-            positions_in_window = []
-            positions_outside_window = []
-            
-            for position in positions:
-                # MT5 positions have a time attribute (timestamp when position was opened)
-                if hasattr(position, 'time') and position.time > 0:
-                    position_time = datetime.fromtimestamp(position.time)
-                    
-                    # Check if position time falls within the 9:00 PM - 12:00 AM window
-                    position_time_minutes = position_time.hour * 60 + position_time.minute
-                    
-                    if window_start_minutes <= position_time_minutes <= window_end_minutes:
-                        # Also check it's from today
-                        if position_time.date() == today:
-                            positions_in_window.append(position)
-                        else:
-                            positions_outside_window.append(position)
-                    else:
-                        positions_outside_window.append(position)
-                else:
-                    # If no time, treat as unknown and include for safety
-                    positions_in_window.append(position)
-            
-            print(f"      • Total open positions: {len(positions)}")
-            print(f"      • Positions in deletion window: {len(positions_in_window)}")
-            print(f"      • Positions outside window (skipped): {len(positions_outside_window)}")
-            
-            stats["positions_found"] = len(positions_in_window)
-            
-            if positions_in_window:
-                for position in positions_in_window:
-                    # Determine if position is buy or sell
-                    is_buy = position.type == mt5.POSITION_TYPE_BUY
-                    position_type = "BUY" if is_buy else "SELL"
-                    
-                    # Prepare close request
-                    tick = mt5.symbol_info_tick(position.symbol)
-                    if not tick:
-                        stats["positions_failed"] += 1
-                        stats["errors"].append(f"{user_brokerid}: Cannot get tick for {position.symbol}")
-                        print(f"           Cannot get current price for {position.symbol}")
-                        continue
-                    
-                    close_price = tick.bid if is_buy else tick.ask
-                    
-                    # Get position time for display
-                    position_time_str = "Unknown"
-                    if hasattr(position, 'time') and position.time > 0:
-                        position_time = datetime.fromtimestamp(position.time)
-                        position_time_str = position_time.strftime('%H:%M:%S')
-                    
-                    print(f"      • Closing {position_type} position #{position.ticket} | {position.symbol}")
-                    print(f"          Volume: {position.volume:.2f} | Open Price: {position.price_open:.5f} | Current: {close_price:.5f}")
-                    print(f"          Profit/Loss: ${position.profit:.2f} | Opened: {position_time_str}")
-                    
-                    close_request = {
-                        "action": mt5.TRADE_ACTION_DEAL,
-                        "symbol": position.symbol,
-                        "volume": position.volume,
-                        "type": mt5.ORDER_TYPE_SELL if is_buy else mt5.ORDER_TYPE_BUY,
-                        "position": position.ticket,
-                        "price": close_price,
-                        "deviation": 20,
-                        "magic": position.magic if hasattr(position, 'magic') else 0
-                    }
-                    
-                    result = mt5.order_send(close_request)
-                    
-                    if result and result.retcode == mt5.TRADE_RETCODE_DONE:
-                        stats["positions_closed"] += 1
-                        print(f"          ✅ Closed successfully")
-                    else:
-                        error_msg = result.comment if result else f"Error code: {mt5.last_error()}"
-                        stats["positions_failed"] += 1
-                        stats["errors"].append(f"{user_brokerid}: Failed to close position #{position.ticket}: {error_msg}")
-                        print(f"           Close failed: {error_msg}")
-            else:
-                print(f"      • No positions opened in the deletion window")
-        else:
-            print(f"      • No open positions found")
-        
-        # --- INVESTOR SUMMARY ---
-        print(f"\n  └─ 📊 Purge Results for {user_brokerid}:")
-        print(f"      • Pending Orders (9PM-12AM): {stats['pending_orders_deleted']}/{stats['pending_orders_found']} deleted")
-        if stats['pending_orders_failed'] > 0:
-            print(f"          ⚠️  {stats['pending_orders_failed']} failed to delete")
-        print(f"      • Positions (9PM-12AM): {stats['positions_closed']}/{stats['positions_found']} closed")
-        if stats['positions_failed'] > 0:
-            print(f"          ⚠️  {stats['positions_failed']} failed to close")
-        
-        stats["processing_success"] = True
-
-    # --- FINAL SUMMARY ---
-    print(f"\n{'='*10} 📊 EMERGENCY PURGE SUMMARY {'='*10}")
-    print(f"   🕐 Execution time: {current_time.strftime('%H:%M:%S')}")
-    print(f"   🕘 Deletion window: 9:00 PM - 12:00 AM")
-    print(f"   Investor(s) processed: {processed}/{total_investors}")
-    print(f"   Total pending orders found in window: {stats['pending_orders_found']}")
-    print(f"   Total pending orders deleted: {stats['pending_orders_deleted']}")
-    print(f"   Total positions found in window: {stats['positions_found']}")
-    print(f"   Total positions closed: {stats['positions_closed']}")
-    
-    if stats['pending_orders_failed'] > 0 or stats['positions_failed'] > 0:
-        print(f"\n   ⚠️  ERRORS ENCOUNTERED: {len(stats['errors'])}")
-        for error in stats['errors'][:5]:
-            print(f"      • {error}")
-        if len(stats['errors']) > 5:
-            print(f"      • ... and {len(stats['errors']) - 5} more errors")
-    
-    total_actions = stats['pending_orders_deleted'] + stats['positions_closed']
-    if total_actions > 0:
-        print(f"\n   ✅ Successfully executed {total_actions} purge actions (9 PM - 12 AM window)")
-    else:
-        print(f"\n   ℹ️  No orders or positions to purge in the 9 PM - 12 AM window")
-    
-    print(f"\n{'='*10} 🏁 EMERGENCY PURGE COMPLETE {'='*10}\n")
-    
-    return stats
-
-def delete_midnight_orders_and_positions(inv_id=None):
-    """
-    Function: Deletes ALL pending orders and closes ALL open positions unconditionally
-    that were created between 9:00 PM and 12:00 AM.
+    that were created within the configured time range from accountmanagement.json.
     Uses EXISTING MT5 connection - does NOT initialize or shutdown MT5.
     
     This function removes all pending orders and closes all open positions for the specified
-    investor(s) that fall within the 9:00 PM - 12:00 AM time window.
+    investor(s) that fall within the configured time window (e.g., 9:00 PM - 12:00 AM).
     
     Args:
         inv_id: Optional specific investor ID to process. If None, processes all investors.
@@ -2755,56 +2427,29 @@ def delete_midnight_orders_and_positions(inv_id=None):
     Returns:
         dict: Statistics about the deletion process
     """
+    global restricted_timerange_alert
+    
     from datetime import datetime
     
-    print(f"\n{'='*10} 🔥 EMERGENCY PURGE: DELETE ORDERS & POSITIONS (9:00 PM - 12:00 AM) {'='*10}")
-    print(" ⚠️  WARNING: This will remove orders/positions created between 9:00 PM and 12:00 AM!")
+    print(f"\n{'='*10} 🔥 EMERGENCY PURGE {'='*10}")
     if inv_id:
-        print(f" Processing single investor: {inv_id}")
+        print(f" Investor: {inv_id}")
 
     # --- TIME CHECK ---
     current_time = datetime.now()
-    current_hour = current_time.hour
-    current_minute = current_time.minute
-    
-    # Define the time window (9:00 PM = 21:00 to 12:00 AM = 24:00/00:00)
-    WINDOW_START_HOUR = 21  # 9:00 PM
-    WINDOW_START_MINUTE = 0
-    WINDOW_END_HOUR = 23    # 11:59 PM
-    WINDOW_END_MINUTE = 59
-    
-    # Check if current time is within the window
-    current_time_minutes = current_hour * 60 + current_minute
-    window_start_minutes = WINDOW_START_HOUR * 60 + WINDOW_START_MINUTE
-    window_end_minutes = WINDOW_END_HOUR * 60 + WINDOW_END_MINUTE
-    
-    is_within_window = window_start_minutes <= current_time_minutes <= window_end_minutes
-    
-    print(f" 🕐 Current time: {current_time.strftime('%H:%M:%S')}")
-    print(f" 🕘 Delete window: {WINDOW_START_HOUR:02d}:{WINDOW_START_MINUTE:02d} - {WINDOW_END_HOUR:02d}:{WINDOW_END_MINUTE:02d}")
-    
-    if not is_within_window:
-        print(f" ⛔ Outside deletion window. No orders/positions will be deleted.")
-        return {
-            "investor_id": inv_id if inv_id else "all",
-            "pending_orders_found": 0,
-            "pending_orders_deleted": 0,
-            "pending_orders_failed": 0,
-            "positions_found": 0,
-            "positions_closed": 0,
-            "positions_failed": 0,
-            "processing_success": False,
-            "time_within_window": False,
-            "current_time": current_time.strftime('%H:%M:%S'),
-            "errors": ["Outside deletion window (9:00 PM - 12:00 AM)"]
-        }
-    
-    print(" ✅ Current time is within the 9:00 PM - 12:00 AM deletion window")
-    print(" ⚠️  Proceeding with emergency purge...")
 
     # ========== VERIFY EXISTING MT5 CONNECTION ==========
     if not mt5.terminal_info():
-        print(f"  MT5 not connected. Cannot proceed.")
+        print(f"  ❌ MT5 not connected")
+        
+        # Set alert flag
+        restricted_timerange_alert = {
+            'is_triggered': False,
+            'investor_id': inv_id if inv_id else "all",
+            'reason': 'MT5 not connected',
+            'timestamp': current_time.strftime('%I:%M:%S %p')
+        }
+        
         return {
             "investor_id": inv_id if inv_id else "all",
             "pending_orders_found": 0,
@@ -2814,13 +2459,10 @@ def delete_midnight_orders_and_positions(inv_id=None):
             "positions_closed": 0,
             "positions_failed": 0,
             "processing_success": False,
-            "time_within_window": True,
-            "current_time": current_time.strftime('%H:%M:%S'),
+            "current_time": current_time.strftime('%I:%M:%S %p'),
             "errors": ["MT5 not connected"]
         }
     
-    print(f" ✅ Using existing MT5 connection")
-
     # --- DATA INITIALIZATION ---
     stats = {
         "investor_id": inv_id if inv_id else "all",
@@ -2831,9 +2473,17 @@ def delete_midnight_orders_and_positions(inv_id=None):
         "positions_closed": 0,
         "positions_failed": 0,
         "processing_success": False,
-        "time_within_window": True,
-        "current_time": current_time.strftime('%H:%M:%S'),
+        "current_time": current_time.strftime('%I:%M:%S %p'),
         "errors": []
+    }
+    
+    # Track if any purge action was taken
+    purge_occurred = False
+    alert_details = {
+        'investors_processed': [],
+        'total_orders_deleted': 0,
+        'total_positions_closed': 0,
+        'investors_with_purge': []
     }
     
     # Determine which investors to process
@@ -2846,74 +2496,146 @@ def delete_midnight_orders_and_positions(inv_id=None):
 
     for user_brokerid in investors_to_process:
         processed += 1
-        print(f"\n[{processed}/{total_investors}] 🔥 PURGING: {user_brokerid}")
+        print(f"\n[{processed}/{total_investors}] 🔥 {user_brokerid}")
+        
+        # --- LOAD INVESTOR CONFIGURATION ---
+        inv_root = Path(INV_PATH) / user_brokerid
+        acc_mgmt_path = inv_root / "accountmanagement.json"
+        
+        # Initialize time window with defaults
+        window_start_hour = 21
+        window_start_minute = 0
+        window_end_hour = 23
+        window_end_minute = 59
+        time_range_config = None
+        
+        # Load time range from accountmanagement.json
+        if acc_mgmt_path.exists():
+            try:
+                with open(acc_mgmt_path, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                
+                settings = config.get("settings", {})
+                time_range = settings.get("restrict_orders_in_time_range_of", {})
+                
+                if time_range and "from" in time_range and "to" in time_range:
+                    time_range_config = time_range
+                    
+                    # Parse time strings (e.g., "9:00 pm" or "21:00")
+                    def parse_time_string(time_str):
+                        time_str = time_str.lower().strip().replace(" ", "")
+                        
+                        is_pm = "pm" in time_str
+                        is_am = "am" in time_str
+                        
+                        clean_time = time_str.replace("pm", "").replace("am", "")
+                        
+                        if ":" in clean_time:
+                            parts = clean_time.split(":")
+                            hour = int(parts[0])
+                            minute = int(parts[1]) if len(parts) > 1 else 0
+                        else:
+                            hour = int(clean_time)
+                            minute = 0
+                        
+                        if is_pm and hour != 12:
+                            hour += 12
+                        elif is_am and hour == 12:
+                            hour = 0
+                        
+                        return hour, minute
+                    
+                    try:
+                        window_start_hour, window_start_minute = parse_time_string(time_range["from"])
+                        window_end_hour, window_end_minute = parse_time_string(time_range["to"])
+                        
+                        # Handle midnight (12:00 am) as end of day
+                        if window_end_hour == 0 and window_end_minute == 0:
+                            window_end_hour = 23
+                            window_end_minute = 59
+                    except:
+                        pass
+            except:
+                pass
+        
+        # Define the time window
+        window_start_minutes = window_start_hour * 60 + window_start_minute
+        window_end_minutes = window_end_hour * 60 + window_end_minute
+        
+        # Check if window crosses midnight
+        crosses_midnight = window_end_minutes < window_start_minutes
+        
+        current_time_minutes = current_time.hour * 60 + current_time.minute
+        
+        if crosses_midnight:
+            is_within_window = (current_time_minutes >= window_start_minutes or 
+                               current_time_minutes <= window_end_minutes)
+        else:
+            is_within_window = window_start_minutes <= current_time_minutes <= window_end_minutes
+        
+        # Format times for display
+        start_time_display = f"{window_start_hour:02d}:{window_start_minute:02d}"
+        end_time_display = f"{window_end_hour:02d}:{window_end_minute:02d}"
+        
+        if time_range_config:
+            print(f"  🕘 Window: {time_range_config['from']} - {time_range_config['to']}")
+        else:
+            # Convert to 12-hour format for display
+            def to_12hr(hour, minute):
+                period = "AM" if hour < 12 else "PM"
+                hour_12 = hour % 12
+                if hour_12 == 0:
+                    hour_12 = 12
+                return f"{hour_12}:{minute:02d} {period}"
+            
+            start_12hr = to_12hr(window_start_hour, window_start_minute)
+            end_12hr = to_12hr(window_end_hour, window_end_minute)
+            print(f"  🕘 Window: {start_12hr} - {end_12hr}")
+        
+        print(f"  🕐 Now: {current_time.strftime('%I:%M:%S %p')}")
+        
+        if not is_within_window:
+            print(f"  ⛔ Outside window - skipping")
+            stats["errors"].append(f"{user_brokerid}: Outside deletion window")
+            continue
+        
+        print(f"  ✅ Within window - purging...")
         
         # Verify account
         acc_info = mt5.account_info()
         if not acc_info:
-            print(f"  └─  Failed to get account info")
+            print(f"  ❌ Account error")
             stats["errors"].append(f"{user_brokerid}: Cannot fetch account info")
             continue
-            
-        print(f"  └─ ✅ Connected to account: {acc_info.login} | Balance: ${acc_info.balance:,.2f}")
         
-        # --- STEP 1: DELETE PENDING ORDERS CREATED IN TIME WINDOW ---
-        print(f"\n  └─ 📋 STEP 1: Deleting pending orders from 9:00 PM - 12:00 AM...")
+        investor_orders_deleted = 0
+        investor_positions_closed = 0
+        
+        # --- DELETE PENDING ORDERS ---
         pending_orders = mt5.orders_get()
         
         if pending_orders:
-            # Filter orders by time
             orders_in_window = []
-            orders_outside_window = []
             
             for order in pending_orders:
-                # MT5 orders have a time_setup attribute (timestamp when order was placed)
                 if hasattr(order, 'time_setup') and order.time_setup > 0:
                     order_time = datetime.fromtimestamp(order.time_setup)
-                    
-                    # Check if order time falls within the 9:00 PM - 12:00 AM window
                     order_time_minutes = order_time.hour * 60 + order_time.minute
                     
-                    if window_start_minutes <= order_time_minutes <= window_end_minutes:
-                        # Also check it's from today
-                        if order_time.date() == today:
-                            orders_in_window.append(order)
-                        else:
-                            orders_outside_window.append(order)
+                    if crosses_midnight:
+                        is_in_window = (order_time_minutes >= window_start_minutes or 
+                                       order_time_minutes <= window_end_minutes)
                     else:
-                        orders_outside_window.append(order)
-                else:
-                    # If no time_setup, treat as unknown and include for safety
-                    orders_in_window.append(order)
-            
-            print(f"      • Total pending orders: {len(pending_orders)}")
-            print(f"      • Orders in deletion window: {len(orders_in_window)}")
-            print(f"      • Orders outside window (skipped): {len(orders_outside_window)}")
+                        is_in_window = window_start_minutes <= order_time_minutes <= window_end_minutes
+                    
+                    if is_in_window and order_time.date() == today:
+                        orders_in_window.append(order)
             
             stats["pending_orders_found"] = len(orders_in_window)
             
             if orders_in_window:
+                print(f"  📋 Deleting {len(orders_in_window)} orders...")
                 for order in orders_in_window:
-                    order_type_name = "ORDER"
-                    if hasattr(order, 'type'):
-                        order_type_names = {
-                            mt5.ORDER_TYPE_BUY_LIMIT: "BUY LIMIT",
-                            mt5.ORDER_TYPE_SELL_LIMIT: "SELL LIMIT",
-                            mt5.ORDER_TYPE_BUY_STOP: "BUY STOP",
-                            mt5.ORDER_TYPE_SELL_STOP: "SELL STOP",
-                            mt5.ORDER_TYPE_BUY_STOP_LIMIT: "BUY STOP-LIMIT",
-                            mt5.ORDER_TYPE_SELL_STOP_LIMIT: "SELL STOP-LIMIT"
-                        }
-                        order_type_name = order_type_names.get(order.type, f"Type {order.type}")
-                    
-                    # Get order time for display
-                    order_time_str = "Unknown"
-                    if hasattr(order, 'time_setup') and order.time_setup > 0:
-                        order_time = datetime.fromtimestamp(order.time_setup)
-                        order_time_str = order_time.strftime('%H:%M:%S')
-                    
-                    print(f"      • Deleting {order_type_name} #{order.ticket} | {order.symbol} @ {order.price_open:.5f} | Time: {order_time_str}")
-                    
                     cancel_request = {
                         "action": mt5.TRADE_ACTION_REMOVE,
                         "order": order.ticket
@@ -2922,77 +2644,51 @@ def delete_midnight_orders_and_positions(inv_id=None):
                     
                     if result and result.retcode == mt5.TRADE_RETCODE_DONE:
                         stats["pending_orders_deleted"] += 1
-                        print(f"          ✅ Deleted successfully")
+                        investor_orders_deleted += 1
+                        purge_occurred = True
                     else:
-                        error_msg = result.comment if result else f"Error code: {mt5.last_error()}"
                         stats["pending_orders_failed"] += 1
-                        stats["errors"].append(f"{user_brokerid}: Failed to delete order #{order.ticket}: {error_msg}")
-                        print(f"           Delete failed: {error_msg}")
+                        stats["errors"].append(f"{user_brokerid}: Order #{order.ticket} delete failed")
+                
+                print(f"    ✅ Deleted: {stats['pending_orders_deleted']}/{len(orders_in_window)}")
             else:
-                print(f"      • No pending orders in the deletion window")
+                print(f"  📋 No orders in window")
         else:
-            print(f"      • No pending orders found")
+            print(f"  📋 No orders found")
         
-        # --- STEP 2: CLOSE OPEN POSITIONS CREATED IN TIME WINDOW ---
-        print(f"\n  └─ 💼 STEP 2: Closing positions opened between 9:00 PM - 12:00 AM...")
+        # --- CLOSE POSITIONS ---
         positions = mt5.positions_get()
         
         if positions:
-            # Filter positions by time
             positions_in_window = []
-            positions_outside_window = []
             
             for position in positions:
-                # MT5 positions have a time attribute (timestamp when position was opened)
                 if hasattr(position, 'time') and position.time > 0:
                     position_time = datetime.fromtimestamp(position.time)
-                    
-                    # Check if position time falls within the 9:00 PM - 12:00 AM window
                     position_time_minutes = position_time.hour * 60 + position_time.minute
                     
-                    if window_start_minutes <= position_time_minutes <= window_end_minutes:
-                        # Also check it's from today
-                        if position_time.date() == today:
-                            positions_in_window.append(position)
-                        else:
-                            positions_outside_window.append(position)
+                    if crosses_midnight:
+                        is_in_window = (position_time_minutes >= window_start_minutes or 
+                                       position_time_minutes <= window_end_minutes)
                     else:
-                        positions_outside_window.append(position)
-                else:
-                    # If no time, treat as unknown and include for safety
-                    positions_in_window.append(position)
-            
-            print(f"      • Total open positions: {len(positions)}")
-            print(f"      • Positions in deletion window: {len(positions_in_window)}")
-            print(f"      • Positions outside window (skipped): {len(positions_outside_window)}")
+                        is_in_window = window_start_minutes <= position_time_minutes <= window_end_minutes
+                    
+                    if is_in_window and position_time.date() == today:
+                        positions_in_window.append(position)
             
             stats["positions_found"] = len(positions_in_window)
             
             if positions_in_window:
+                print(f"  💼 Closing {len(positions_in_window)} positions...")
                 for position in positions_in_window:
-                    # Determine if position is buy or sell
                     is_buy = position.type == mt5.POSITION_TYPE_BUY
-                    position_type = "BUY" if is_buy else "SELL"
                     
-                    # Get current price
                     tick = mt5.symbol_info_tick(position.symbol)
                     if not tick:
                         stats["positions_failed"] += 1
-                        stats["errors"].append(f"{user_brokerid}: Cannot get tick for {position.symbol}")
-                        print(f"           Cannot get current price for {position.symbol}")
                         continue
                     
                     close_price = tick.bid if is_buy else tick.ask
-                    
-                    # Get position time for display
-                    position_time_str = "Unknown"
-                    if hasattr(position, 'time') and position.time > 0:
-                        position_time = datetime.fromtimestamp(position.time)
-                        position_time_str = position_time.strftime('%H:%M:%S')
-                    
-                    print(f"      • Closing {position_type} position #{position.ticket} | {position.symbol}")
-                    print(f"          Volume: {position.volume:.2f} | Open Price: {position.price_open:.5f} | Current: {close_price:.5f}")
-                    print(f"          Profit/Loss: ${position.profit:.2f} | Opened: {position_time_str}")
                     
                     close_request = {
                         "action": mt5.TRADE_ACTION_DEAL,
@@ -3009,52 +2705,51 @@ def delete_midnight_orders_and_positions(inv_id=None):
                     
                     if result and result.retcode == mt5.TRADE_RETCODE_DONE:
                         stats["positions_closed"] += 1
-                        print(f"          ✅ Closed successfully")
+                        investor_positions_closed += 1
+                        purge_occurred = True
                     else:
-                        error_msg = result.comment if result else f"Error code: {mt5.last_error()}"
                         stats["positions_failed"] += 1
-                        stats["errors"].append(f"{user_brokerid}: Failed to close position #{position.ticket}: {error_msg}")
-                        print(f"           Close failed: {error_msg}")
+                        stats["errors"].append(f"{user_brokerid}: Position #{position.ticket} close failed")
+                
+                print(f"    ✅ Closed: {stats['positions_closed']}/{len(positions_in_window)}")
             else:
-                print(f"      • No positions opened in the deletion window")
+                print(f"  💼 No positions in window")
         else:
-            print(f"      • No open positions found")
+            print(f"  💼 No positions found")
         
-        # --- INVESTOR SUMMARY ---
-        print(f"\n  └─ 📊 Purge Results for {user_brokerid}:")
-        print(f"      • Pending Orders (9PM-12AM): {stats['pending_orders_deleted']}/{stats['pending_orders_found']} deleted")
-        if stats['pending_orders_failed'] > 0:
-            print(f"          ⚠️  {stats['pending_orders_failed']} failed to delete")
-        print(f"      • Positions (9PM-12AM): {stats['positions_closed']}/{stats['positions_found']} closed")
-        if stats['positions_failed'] > 0:
-            print(f"          ⚠️  {stats['positions_failed']} failed to close")
+        # Track investor data for alert
+        alert_details['investors_processed'].append(user_brokerid)
+        if investor_orders_deleted > 0 or investor_positions_closed > 0:
+            alert_details['investors_with_purge'].append({
+                'investor': user_brokerid,
+                'orders_deleted': investor_orders_deleted,
+                'positions_closed': investor_positions_closed,
+                'time_window': time_range_config if time_range_config else f"{start_12hr} - {end_12hr}"
+            })
+        
+        alert_details['total_orders_deleted'] += investor_orders_deleted
+        alert_details['total_positions_closed'] += investor_positions_closed
+        
+        # Summary for this investor
+        if investor_orders_deleted > 0 or investor_positions_closed > 0:
+            print(f"  📊 Purged: {investor_orders_deleted} orders, {investor_positions_closed} positions")
         
         stats["processing_success"] = True
 
-    # --- FINAL SUMMARY ---
-    print(f"\n{'='*10} 📊 EMERGENCY PURGE SUMMARY {'='*10}")
-    print(f"   🕐 Execution time: {current_time.strftime('%H:%M:%S')}")
-    print(f"   🕘 Deletion window: 9:00 PM - 12:00 AM")
-    print(f"   Investor(s) processed: {processed}/{total_investors}")
-    print(f"   Total pending orders found in window: {stats['pending_orders_found']}")
-    print(f"   Total pending orders deleted: {stats['pending_orders_deleted']}")
-    print(f"   Total positions found in window: {stats['positions_found']}")
-    print(f"   Total positions closed: {stats['positions_closed']}")
-    
-    if stats['pending_orders_failed'] > 0 or stats['positions_failed'] > 0:
-        print(f"\n   ⚠️  ERRORS ENCOUNTERED: {len(stats['errors'])}")
-        for error in stats['errors'][:5]:
-            print(f"      • {error}")
-        if len(stats['errors']) > 5:
-            print(f"      • ... and {len(stats['errors']) - 5} more errors")
-    
-    total_actions = stats['pending_orders_deleted'] + stats['positions_closed']
-    if total_actions > 0:
-        print(f"\n   ✅ Successfully executed {total_actions} purge actions (9 PM - 12 AM window)")
-    else:
-        print(f"\n   ℹ️  No orders or positions to purge in the 9 PM - 12 AM window")
-    
-    print(f"\n{'='*10} 🏁 EMERGENCY PURGE COMPLETE {'='*10}\n")
+    # --- SET GLOBAL ALERT FLAG ---
+    restricted_timerange_alert = {
+        'is_triggered': purge_occurred,
+        'investor_id': inv_id if inv_id else "all",
+        'timestamp': current_time.strftime('%I:%M:%S %p'),
+        'time_window': time_range_config if time_range_config else f"{start_12hr} - {end_12hr}",
+        'total_orders_deleted': alert_details['total_orders_deleted'],
+        'total_positions_closed': alert_details['total_positions_closed'],
+        'investors_processed': alert_details['investors_processed'],
+        'investors_with_purge': alert_details['investors_with_purge'],
+        'details': alert_details
+    }
+
+    print(f"{'='*10} 🏁 COMPLETE {'='*10}\n")
     
     return stats
 #         --        #
@@ -16371,84 +16066,8 @@ def process_single_investor(inv_folder):
     WORKER FUNCTION: Handles the entire pipeline for ONE investor.
     Sequential execution without console output.
     """
-    inv_id = inv_folder.name
+    global restricted_timerange_alert
     
-    account_stats = {
-        "inv_id": inv_id, 
-        "success": False, 
-        "price_collection_stats": {},
-        "candle_fetch_stats": {},
-        "crosser_analysis_stats": {},
-        "trapped_analysis_stats": {},
-        "liquidator_analysis_stats": {},
-        "ranging_analysis_stats": {},
-        "order_placement_stats": {},
-        "risk_correction_stats": {},
-        "risk_audit_stats": {},
-        "symbols_filtered": 0,
-        "orders_filtered": 0,
-        "symbols_processed": 0,
-        "symbols_successful": 0,
-        "orders_placed": 0,
-        "counter_orders_placed": 0,
-        "total_active_orders": 0,
-        "orders_adjusted": 0,
-        "orders_removed": 0,
-        "current_candle_forming": False,
-        "bid_wins": 0,
-        "ask_wins": 0,
-        "trapped_candles_found": 0,
-        "symbols_with_trapped": 0,
-        "symbols_with_liquidator": 0,
-        "liquidator_candles_found": 0,
-        "bullish_liquidators": 0,
-        "bearish_liquidators": 0,
-        "symbols_ranging": 0,
-        "avg_ranging_cycles": 0
-    }
-    
-    broker_cfg = usersdictionary.get(inv_id)
-    if not broker_cfg:
-        return account_stats
-
-    import random
-    import time
-    time.sleep(random.uniform(0.1, 2.0)) 
-    
-    login_id = int(broker_cfg['LOGIN_ID'])
-    mt5_path = broker_cfg["TERMINAL_PATH"]
-
-    try:
-        if not mt5.initialize(path=mt5_path, timeout=180000):
-            return account_stats
-
-        acc = mt5.account_info()
-        if acc is None or acc.login != login_id:
-            if not mt5.login(login_id, password=broker_cfg["PASSWORD"], server=broker_cfg["SERVER"]):
-                mt5.shutdown()
-                return account_stats
-            
-        #LOOK HERE MOTHERFUCKER
-        place_usd_orders(inv_id=inv_id)
-        #delete_unauthorized_symbol_files(inv_id=inv_id)
-        #additional_candles_for_orders_limitation(inv_id=inv_id)
-
-        mt5.shutdown()
-        account_stats["success"] = True
-        
-    except Exception as e:
-        try:
-            mt5.shutdown()
-        except:
-            pass
-    
-    return account_stats
-
-def process_single_invest(inv_folder):
-    """
-    WORKER FUNCTION: Handles the entire pipeline for ONE investor.
-    Sequential execution without console output.
-    """
     inv_id = inv_folder.name
     
     account_stats = {
@@ -16484,7 +16103,10 @@ def process_single_invest(inv_folder):
         "symbols_ranging": 0,
         "avg_ranging_cycles": 0,
         "spread_check_skipped": False,
-        "spread_warning_details": None
+        "spread_warning_details": None,
+        "restricted_timerange_purge": False,
+        "execution_skipped": False,
+        "skip_reason": None
     }
     
     broker_cfg = usersdictionary.get(inv_id)
@@ -16509,7 +16131,160 @@ def process_single_invest(inv_folder):
                 return account_stats
         
         # =====================================================================
-        # STEP 1: QUICK SPREAD CHECK (LIGHT VERSION THAT SAVES DATA)
+        # STEP 1: CHECK FOR RESTRICTED TIME RANGE PURGE
+        # =====================================================================
+        print(f"🔍 [{inv_id}] Checking restricted time range status...")
+        
+        # Run the restricted timerange check first
+        timerange_result = disable_orders_in_restricted_timerange(inv_id=inv_id)
+        
+        # Check if purge was triggered
+        if restricted_timerange_alert and restricted_timerange_alert.get('is_triggered', False):
+            print(f"⚠️ [{inv_id}] RESTRICTED TIME RANGE PURGE EXECUTED - Skipping main trading functions")
+            account_stats["restricted_timerange_purge"] = True
+            account_stats["execution_skipped"] = True
+            account_stats["skip_reason"] = f"Time range purge executed at {restricted_timerange_alert.get('timestamp', 'unknown')}"
+            account_stats["success"] = True  # Mark as success since purge was handled
+            account_stats["orders_removed"] = restricted_timerange_alert.get('total_orders_deleted', 0)
+            account_stats["positions_closed"] = restricted_timerange_alert.get('total_positions_closed', 0)
+            
+            # Only run essential cleanup functions
+            delete_all_orders_and_positions
+
+            
+            mt5.shutdown()
+            return account_stats
+        
+        # If no purge was triggered, proceed with normal operations
+        print(f"✅ [{inv_id}] No restricted timerange purge - proceeding with normal operations")
+        
+        # =====================================================================
+        # STEP 2: QUICK SPREAD CHECK (LIGHT VERSION THAT SAVES DATA)
+        # =====================================================================
+        print(f"🔍 [{inv_id}] Running quick spread check...")
+        
+        #is_wide, spread_details, saved = symbol_spread_alert(inv_id=inv_id)
+        move_verified_investors()
+        update_verified_investors_file()
+        get_requirements(inv_id=inv_id)
+        
+        
+    
+        mt5.shutdown()
+        account_stats["success"] = True
+        account_stats["spread_check_skipped"] = False
+        account_stats["spread_warning_details"] = None
+        account_stats["restricted_timerange_purge"] = False
+        account_stats["execution_skipped"] = False
+        
+    except Exception as e:
+        try:
+            mt5.shutdown()
+        except:
+            pass
+    
+    return account_stats
+
+def process_single_invest(inv_folder):
+    """
+    WORKER FUNCTION: Handles the entire pipeline for ONE investor.
+    Sequential execution without console output.
+    """
+    global restricted_timerange_alert
+    
+    inv_id = inv_folder.name
+    
+    account_stats = {
+        "inv_id": inv_id, 
+        "success": False, 
+        "price_collection_stats": {},
+        "candle_fetch_stats": {},
+        "crosser_analysis_stats": {},
+        "trapped_analysis_stats": {},
+        "liquidator_analysis_stats": {},
+        "ranging_analysis_stats": {},
+        "order_placement_stats": {},
+        "risk_correction_stats": {},
+        "risk_audit_stats": {},
+        "symbols_filtered": 0,
+        "orders_filtered": 0,
+        "symbols_processed": 0,
+        "symbols_successful": 0,
+        "orders_placed": 0,
+        "counter_orders_placed": 0,
+        "total_active_orders": 0,
+        "orders_adjusted": 0,
+        "orders_removed": 0,
+        "current_candle_forming": False,
+        "bid_wins": 0,
+        "ask_wins": 0,
+        "trapped_candles_found": 0,
+        "symbols_with_trapped": 0,
+        "symbols_with_liquidator": 0,
+        "liquidator_candles_found": 0,
+        "bullish_liquidators": 0,
+        "bearish_liquidators": 0,
+        "symbols_ranging": 0,
+        "avg_ranging_cycles": 0,
+        "spread_check_skipped": False,
+        "spread_warning_details": None,
+        "restricted_timerange_purge": False,
+        "execution_skipped": False,
+        "skip_reason": None
+    }
+    
+    broker_cfg = usersdictionary.get(inv_id)
+    if not broker_cfg:
+        return account_stats
+
+    import random
+    import time
+    time.sleep(random.uniform(0.1, 2.0)) 
+    
+    login_id = int(broker_cfg['LOGIN_ID'])
+    mt5_path = broker_cfg["TERMINAL_PATH"]
+
+    try:
+        if not mt5.initialize(path=mt5_path, timeout=180000):
+            return account_stats
+
+        acc = mt5.account_info()
+        if acc is None or acc.login != login_id:
+            if not mt5.login(login_id, password=broker_cfg["PASSWORD"], server=broker_cfg["SERVER"]):
+                mt5.shutdown()
+                return account_stats
+        
+        # =====================================================================
+        # STEP 1: CHECK FOR RESTRICTED TIME RANGE PURGE
+        # =====================================================================
+        print(f"🔍 [{inv_id}] Checking restricted time range status...")
+        
+        # Run the restricted timerange check first
+        timerange_result = disable_orders_in_restricted_timerange(inv_id=inv_id)
+        
+        # Check if purge was triggered
+        if restricted_timerange_alert and restricted_timerange_alert.get('is_triggered', False):
+            print(f"⚠️ [{inv_id}] RESTRICTED TIME RANGE PURGE EXECUTED - Skipping main trading functions")
+            account_stats["restricted_timerange_purge"] = True
+            account_stats["execution_skipped"] = True
+            account_stats["skip_reason"] = f"Time range purge executed at {restricted_timerange_alert.get('timestamp', 'unknown')}"
+            account_stats["success"] = True  # Mark as success since purge was handled
+            account_stats["orders_removed"] = restricted_timerange_alert.get('total_orders_deleted', 0)
+            account_stats["positions_closed"] = restricted_timerange_alert.get('total_positions_closed', 0)
+            
+            # Only run essential cleanup functions
+            update_verified_investors_file()
+            check_and_record_authorized_actions(inv_id=inv_id)
+            update_investor_info(inv_id=inv_id)
+            
+            mt5.shutdown()
+            return account_stats
+        
+        # If no purge was triggered, proceed with normal operations
+        print(f"✅ [{inv_id}] No restricted timerange purge - proceeding with normal operations")
+        
+        # =====================================================================
+        # STEP 2: QUICK SPREAD CHECK (LIGHT VERSION THAT SAVES DATA)
         # =====================================================================
         print(f"🔍 [{inv_id}] Running quick spread check...")
         
@@ -16520,7 +16295,6 @@ def process_single_invest(inv_folder):
         
         delete_unauthorized_symbol_files(inv_id=inv_id)
         additional_candles_for_orders_limitation(inv_id=inv_id)
-        delete_midnight_orders_and_positions(inv_id=inv_id)
         fetch_ohlc_data_for_investor(inv_id=inv_id)
         directional_bias(inv_id=inv_id)
         additional_candles_for_orders_limitation(inv_id=inv_id)
@@ -16552,6 +16326,8 @@ def process_single_invest(inv_folder):
         account_stats["success"] = True
         account_stats["spread_check_skipped"] = False
         account_stats["spread_warning_details"] = None
+        account_stats["restricted_timerange_purge"] = False
+        account_stats["execution_skipped"] = False
         
     except Exception as e:
         try:
