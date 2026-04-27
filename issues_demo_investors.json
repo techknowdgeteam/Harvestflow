@@ -25,7 +25,7 @@
         "message": "NULL",
         "unauthorized_actions": "{\"detected\":false,\"bypass_active\":true,\"autotrading_active\":true,\"type\":[],\"unauthorized_trades\":[],\"unauthorized_withdrawals\":[]}",
         "INVESTED_WITH": "deriv_prices",
-        "TERMINAL_PATH": "C:\\xampp\\htdocs\\harvore\\mt5\\MetaTrader 5 Deriv e\\terminal64.exe",
+        "TERMINAL_PATH": "C:\\xampp\\htdocs\\harvcore\\mt5\\MetaTrader 5 Deriv e\\terminal64.exe",
         "verified_status": "tradeshistory_read_error",
         "MESSAGE": "Error reading tradeshistory.json: Expecting ',' delimiter: line 29996 column 32 (char 854092)"
     }
