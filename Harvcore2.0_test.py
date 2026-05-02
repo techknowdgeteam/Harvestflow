@@ -5260,7 +5260,7 @@ def additional_candles_for_orders_limitation(inv_id=None):
     
     return stats
 
-def create_position_hedge(inv_id=None):
+def create_position_hedge_old(inv_id=None):
     """
     Creates hedge orders for existing running positions by analyzing MT5 positions AND tradeshistory.json.
     
@@ -5938,6 +5938,825 @@ def create_position_hedge(inv_id=None):
     print("="*80)
     
     return hedge_stats['hedges_created'] > 0 or hedge_stats['hedges_removed'] > 0 or hedge_stats['orphaned_hedges_closed'] > 0 or hedge_stats['orphaned_hedges_cancelled'] > 0
+
+def create_position_hedge(inv_id=None):
+    """
+    Creates hedge orders for existing running positions by analyzing MT5 positions AND tradeshistory.json.
+    
+    NEW LOGIC: Validates if original position's stoploss is in profit/breakeven
+    - If SL is at profit/breakeven → SKIP creating OR REMOVE existing hedge
+    - If SL is in loss → CREATE/MAINTAIN hedge
+    
+    Process:
+    1. Gets ALL running positions directly from MT5 terminal
+    2. Checks MT5 history for any closed positions that were previously running
+    3. REMOVES ORPHANED HEDGES: If hedge's parent is NOT in running positions AND NOT in pending orders
+       -> Parent has been closed -> Remove hedge using same logic as close_unauthorized_orders
+    4. If closed position found in profit -> removes associated hedge from limit_orders.json
+    5. For each remaining MT5 position, CHECK SL PROFITABILITY before creating hedge
+    6. Updates trade history with status tracking
+    7. Saves hedge orders to limit_orders.json
+    """
+    
+    print("\n" + "="*80)
+    print("🔒 CREATING HEDGE ORDERS FOR RUNNING POSITIONS")
+    print("="*80)
+    
+    # Ensure MT5 is initialized
+    if not mt5.terminal_info():
+        print("  Initializing MT5 connection...")
+        if not mt5.initialize():
+            print("   Failed to initialize MT5")
+            return False
+    
+    investor_ids = [inv_id] if inv_id else list(usersdictionary.keys())
+    hedge_stats = {
+        'investors_processed': 0,
+        'positions_analyzed': 0,
+        'hedges_created': 0,
+        'hedges_removed': 0,
+        'hedges_skipped_sl_profit': 0,  # NEW: Track hedges skipped because SL in profit
+        'hedges_removed_sl_profit': 0,  # NEW: Track hedges removed because SL turned profitable
+        'orphaned_hedges_closed': 0,
+        'orphaned_hedges_cancelled': 0,
+        'positions_closed_profit': 0,
+        'positions_closed_loss': 0,
+        'errors': 0
+    }
+    
+    for user_brokerid in investor_ids:
+        print(f"\n{'='*60}")
+        print(f"📋 INVESTOR: {user_brokerid}")
+        print(f"{'='*60}")
+        
+        investor_root = Path(INV_PATH) / user_brokerid
+        
+        if not investor_root.exists():
+            print(f"   Investor root not found: {investor_root}")
+            continue
+        
+        # Step 1: Get strategy name using GLOBAL VERIFIED_INVESTORS (same as directional_bias)
+        acc_mgmt_path = investor_root / "accountmanagement.json"
+        strategy_name = "prices"
+        target_folder = "prices"
+        
+        if acc_mgmt_path.exists():
+            try:
+                with open(acc_mgmt_path, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                
+                # Use the global VERIFIED_INVESTORS variable (same as directional_bias)
+                if VERIFIED_INVESTORS:
+                    try:
+                        with open(VERIFIED_INVESTORS, 'r', encoding='utf-8') as f:
+                            investor_users = json.load(f)
+                        
+                        investor_cfg = investor_users.get(user_brokerid)
+                        if investor_cfg:
+                            invested_with = investor_cfg.get("INVESTED_WITH", "")
+                            if "_" in invested_with:
+                                target_folder = invested_with.split("_", 1)[1]
+                                strategy_name = target_folder
+                            else:
+                                target_folder = invested_with
+                                strategy_name = invested_with
+                    except Exception as e:
+                        print(f"  ⚠️ Error reading verified investors: {e}")
+                
+                # Also get risk_reward from config if needed
+                selected_risk_reward = config.get("selected_risk_reward", [3])
+                if isinstance(selected_risk_reward, list) and len(selected_risk_reward) > 0:
+                    risk_reward_default = selected_risk_reward[0]
+                else:
+                    risk_reward_default = 3
+                    
+            except Exception as e:
+                print(f"  ⚠️ Error reading config: {e}")
+                risk_reward_default = 3
+        else:
+            risk_reward_default = 3
+        
+        print(f"  📁 Strategy name: {strategy_name}")
+        print(f"  📁 Target folder: {target_folder}")
+        
+        # Connect to MT5 account
+        broker_cfg = usersdictionary.get(user_brokerid)
+        if not broker_cfg:
+            print(f"  ⚠️ No broker configuration found for {user_brokerid}")
+            continue
+        
+        login_id = int(broker_cfg['LOGIN_ID'])
+        mt5_path = broker_cfg["TERMINAL_PATH"]
+        
+        # Check if already connected to correct account
+        acc = mt5.account_info()
+        if acc is None or acc.login != login_id:
+            print(f"  ⚠️ Not logged into correct account. Expected: {login_id}")
+            if not mt5.initialize(path=mt5_path, login=login_id, 
+                                   password=broker_cfg["PASSWORD"], 
+                                   server=broker_cfg["SERVER"]):
+                print(f"   Failed to initialize MT5 for {user_brokerid}")
+                continue
+        else:
+            print(f"  ✅ Connected to account: {acc.login}")
+        
+        # Step 2: Load tradeshistory.json
+        history_path = investor_root / "tradeshistory.json"
+        trade_details_by_ticket = {}
+        trade_history_list = []
+        
+        if history_path.exists():
+            try:
+                with open(history_path, 'r', encoding='utf-8') as f:
+                    trade_history_list = json.load(f)
+                
+                for trade in trade_history_list:
+                    ticket = trade.get('ticket')
+                    if ticket:
+                        trade_details_by_ticket[ticket] = trade
+                
+                print(f"  📋 Loaded {len(trade_details_by_ticket)} trade records from tradeshistory.json")
+            except Exception as e:
+                print(f"  ⚠️ Error reading tradeshistory.json: {e}")
+        
+        # Step 3: Get MT5 running positions AND pending orders
+        print(f"  🔍 Fetching running positions from MT5 terminal...")
+        mt5_positions = mt5.positions_get()
+        mt5_pending_orders = mt5.orders_get()
+        
+        if mt5_positions is None:
+            print(f"  ⚠️ No MT5 positions found or error retrieving positions")
+        
+        # Filter by magic numbers
+        investor_magics = set()
+        for trade in trade_history_list:
+            magic = trade.get('magic')
+            if magic:
+                investor_magics.add(int(magic))
+        
+        if investor_magics:
+            running_positions = [p for p in mt5_positions if p.magic in investor_magics] if mt5_positions else []
+            pending_orders = [o for o in mt5_pending_orders if o.magic in investor_magics] if mt5_pending_orders else []
+            print(f"  📊 Found {len(running_positions)} running positions in MT5")
+            print(f"  📊 Found {len(pending_orders)} pending orders in MT5")
+        else:
+            running_positions = list(mt5_positions) if mt5_positions else []
+            pending_orders = list(mt5_pending_orders) if mt5_pending_orders else []
+            print(f"  📊 Found {len(running_positions)} running positions in MT5")
+            print(f"  📊 Found {len(pending_orders)} pending orders in MT5")
+        
+        # Create sets of ALL active tickets (running + pending)
+        running_tickets = {p.ticket for p in running_positions} if running_positions else set()
+        pending_tickets = {o.ticket for o in pending_orders} if pending_orders else set()
+        all_active_tickets = running_tickets | pending_tickets
+        
+        print(f"  🎫 All active tickets (running + pending): {len(all_active_tickets)}")
+        
+        # ============================================================
+        # NEW STEP: VALIDATE EXISTING HEDGES AGAINST SL PROFITABILITY
+        # Check if hedge's parent position has its SL in profit/breakeven
+        # If SL is now profitable → remove the hedge (it's no longer needed)
+        # ============================================================
+        print(f"\n  🔍 VALIDATING EXISTING HEDGES AGAINST SL PROFITABILITY...")
+        
+        hedges_removed_due_to_sl_profit = 0
+        
+        # Load existing signals to check for hedges
+        strategy_base_dir = investor_root / strategy_name
+        pending_orders_dir = strategy_base_dir / "pending_orders"
+        signals_file = pending_orders_dir / "limit_orders.json"
+        
+        existing_signals = []
+        if signals_file.exists():
+            try:
+                with open(signals_file, 'r', encoding='utf-8') as f:
+                    existing_signals = json.load(f)
+                print(f"  📋 Loaded {len(existing_signals)} existing signals from limit_orders.json")
+            except Exception as e:
+                print(f"  ⚠️ Error reading existing signals: {e}")
+        
+        # Create a map of positions by ticket for easy lookup
+        position_by_ticket = {p.ticket: p for p in running_positions} if running_positions else {}
+        
+        # Function to check if SL is in profit/breakeven
+        def is_sl_in_profit(position):
+            """
+            Check if position's stoploss is at breakeven or in profit.
+            
+            Returns:
+                True if SL is at profit/breakeven (hedge not needed)
+                False if SL is in loss (hedge needed)
+            """
+            entry_price = position.price_open
+            sl_price = position.sl
+            
+            if sl_price == 0:
+                # No stoploss set - this is dangerous, but for hedge logic:
+                # Without SL, position is unprotected - hedge IS needed
+                return False
+            
+            is_long = (position.type == mt5.POSITION_TYPE_BUY)
+            
+            if is_long:
+                # For LONG: SL at or above entry = breakeven or profit
+                # Example: Entry 1.1000, SL 1.1010 (above) → SL in profit
+                # Example: Entry 1.1000, SL 1.1000 (equal) → Breakeven
+                return sl_price >= entry_price
+            else:
+                # For SHORT: SL at or below entry = breakeven or profit
+                # Example: Entry 1.1000, SL 1.0990 (below) → SL in profit
+                return sl_price <= entry_price
+        
+        # Check existing hedges and validate if still needed
+        if existing_signals and position_by_ticket:
+            signals_to_keep = []
+            
+            for signal in existing_signals:
+                is_hedge = signal.get('is_hedge_order', False)
+                
+                if is_hedge:
+                    parent_ticket = signal.get('parent_ticket')
+                    
+                    if parent_ticket and parent_ticket in position_by_ticket:
+                        # Hedge's parent is still running - check if hedge is still needed
+                        parent_position = position_by_ticket[parent_ticket]
+                        
+                        if is_sl_in_profit(parent_position):
+                            # SL is in profit/breakeven - hedge is no longer needed
+                            print(f"\n    🗑️ HEDGE NO LONGER NEEDED: Parent #{parent_ticket}")
+                            print(f"       • Symbol: {parent_position.symbol}")
+                            print(f"       • Direction: {'LONG' if parent_position.type == mt5.POSITION_TYPE_BUY else 'SHORT'}")
+                            print(f"       • Entry: {parent_position.price_open}")
+                            print(f"       • Current SL: {parent_position.sl}")
+                            print(f"       • SL Status: {'≥ Entry (Profit/BE)' if parent_position.type == mt5.POSITION_TYPE_BUY else '≤ Entry (Profit/BE)'}")
+                            print(f"       → Removing hedge from limit_orders.json")
+                            
+                            hedges_removed_due_to_sl_profit += 1
+                            hedge_stats['hedges_removed_sl_profit'] += 1
+                            # Skip adding this signal to signals_to_keep (effectively removing it)
+                            continue
+                        else:
+                            # Hedge still needed - keep it
+                            signals_to_keep.append(signal)
+                    else:
+                        # Parent not found in current positions - may be orphaned or closed
+                        # Keep for orphaned hedge detection later
+                        signals_to_keep.append(signal)
+                else:
+                    # Not a hedge - keep it
+                    signals_to_keep.append(signal)
+            
+            if hedges_removed_due_to_sl_profit > 0:
+                existing_signals = signals_to_keep
+                print(f"\n  ✅ Removed {hedges_removed_due_to_sl_profit} hedge(s) because parent SL became profitable/breakeven")
+                
+                # Save the updated signals
+                try:
+                    with open(signals_file, 'w', encoding='utf-8') as f:
+                        json.dump(existing_signals, f, indent=4)
+                    print(f"  💾 Updated limit_orders.json after removing unneeded hedges")
+                except Exception as e:
+                    print(f"  ⚠️ Error saving updated signals: {e}")
+        
+        # ============================================================
+        # CLEANUP ORPHANED HEDGE ORDERS (existing logic)
+        # Check if hedge's parent ticket is NOT in active positions/pending orders
+        # If parent is gone -> close/cancel the hedge using close_unauthorized_orders logic
+        # ============================================================
+        print(f"\n  🧹 CHECKING FOR ORPHANED HEDGE ORDERS...")
+        
+        orphaned_hedges_removed = 0
+        
+        # Check running positions that are hedges
+        if running_positions:
+            for position in running_positions:
+                # Check if this position is a hedge order
+                # Look for it in trade history
+                pos_ticket = position.ticket
+                trade_record = trade_details_by_ticket.get(pos_ticket, {})
+                
+                if trade_record.get('is_hedge_order'):
+                    parent_ticket = trade_record.get('parent_ticket')
+                    
+                    if parent_ticket and parent_ticket not in all_active_tickets:
+                        # Parent is no longer active - close this hedge position
+                        print(f"\n    🚨 ORPHANED HEDGE FOUND: Position #{pos_ticket}")
+                        print(f"       • Symbol: {position.symbol}")
+                        print(f"       • Type: {'BUY' if position.type == mt5.POSITION_TYPE_BUY else 'SELL'}")
+                        print(f"       • Parent ticket {parent_ticket} is NOT active anymore")
+                        print(f"       → Closing this orphaned hedge...")
+                        
+                        # Get current market price
+                        tick = mt5.symbol_info_tick(position.symbol)
+                        if not tick:
+                            print(f"         Cannot get price for {position.symbol} - cannot close")
+                            hedge_stats['errors'] += 1
+                            continue
+                        
+                        # Determine closing order type
+                        if position.type == mt5.POSITION_TYPE_BUY:
+                            close_type = mt5.ORDER_TYPE_SELL
+                            close_price = tick.bid
+                        else:
+                            close_type = mt5.ORDER_TYPE_BUY
+                            close_price = tick.ask
+                        
+                        close_request = {
+                            "action": mt5.TRADE_ACTION_DEAL,
+                            "symbol": position.symbol,
+                            "volume": position.volume,
+                            "type": close_type,
+                            "position": pos_ticket,
+                            "price": close_price,
+                            "deviation": 20,
+                            "magic": position.magic if hasattr(position, 'magic') else 0,
+                            "comment": "ORPHANED HEDGE - Parent closed",
+                            "type_time": mt5.ORDER_TIME_GTC,
+                            "type_filling": mt5.ORDER_FILLING_IOC,
+                        }
+                        
+                        try:
+                            result = mt5.order_send(close_request)
+                            
+                            if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+                                print(f"         ✅ SUCCESS: Orphaned hedge #{pos_ticket} CLOSED")
+                                orphaned_hedges_removed += 1
+                                hedge_stats['orphaned_hedges_closed'] += 1
+                                
+                                # Update trade history
+                                trade_record['status'] = 'closed'
+                                trade_record['closed_at'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                trade_record['closed_reason'] = 'orphaned_hedge_parent_closed'
+                            else:
+                                error_msg = result.comment if result else "No response"
+                                error_code = result.retcode if result else "Unknown"
+                                print(f"          FAILED: {error_msg} (code: {error_code})")
+                                
+                                # Try alternative closure
+                                print(f"         🔄 Attempting alternative closure...")
+                                alt_close_request = {
+                                    "action": mt5.TRADE_ACTION_DEAL,
+                                    "symbol": position.symbol,
+                                    "volume": position.volume,
+                                    "type": close_type,
+                                    "position": pos_ticket,
+                                    "price": close_price,
+                                    "deviation": 50,
+                                    "comment": "ORPHANED HEDGE - Retry",
+                                    "type_filling": mt5.ORDER_FILLING_RETURN,
+                                }
+                                
+                                alt_result = mt5.order_send(alt_close_request)
+                                if alt_result and alt_result.retcode == mt5.TRADE_RETCODE_DONE:
+                                    print(f"         ✅ SUCCESS (alt): Orphaned hedge #{pos_ticket} CLOSED")
+                                    orphaned_hedges_removed += 1
+                                    hedge_stats['orphaned_hedges_closed'] += 1
+                                    
+                                    trade_record['status'] = 'closed'
+                                    trade_record['closed_at'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                    trade_record['closed_reason'] = 'orphaned_hedge_parent_closed'
+                                else:
+                                    alt_error = alt_result.comment if alt_result else "No response"
+                                    print(f"          Alternative also FAILED: {alt_error}")
+                                    hedge_stats['errors'] += 1
+                        except Exception as e:
+                            print(f"          EXCEPTION: {e}")
+                            hedge_stats['errors'] += 1
+        
+        # Check pending orders that are hedges
+        if pending_orders:
+            for order in pending_orders:
+                order_ticket = order.ticket
+                trade_record = trade_details_by_ticket.get(order_ticket, {})
+                
+                if trade_record.get('is_hedge_order'):
+                    parent_ticket = trade_record.get('parent_ticket')
+                    
+                    if parent_ticket and parent_ticket not in all_active_tickets:
+                        # Parent is no longer active - cancel this hedge pending order
+                        print(f"\n    🚨 ORPHANED HEDGE PENDING ORDER: #{order_ticket}")
+                        print(f"       • Symbol: {order.symbol}")
+                        print(f"       • Type: {order.type}")
+                        print(f"       • Parent ticket {parent_ticket} is NOT active anymore")
+                        print(f"       → Cancelling this orphaned hedge order...")
+                        
+                        cancel_request = {
+                            "action": mt5.TRADE_ACTION_REMOVE,
+                            "order": order_ticket
+                        }
+                        
+                        try:
+                            result = mt5.order_send(cancel_request)
+                            
+                            if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+                                print(f"         ✅ SUCCESS: Orphaned hedge order #{order_ticket} CANCELLED")
+                                orphaned_hedges_removed += 1
+                                hedge_stats['orphaned_hedges_cancelled'] += 1
+                                
+                                # Update trade history
+                                trade_record['status'] = 'cancelled'
+                                trade_record['cancelled_at'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                trade_record['cancelled_reason'] = 'orphaned_hedge_parent_closed'
+                            else:
+                                error_msg = result.comment if result else "No response"
+                                error_code = result.retcode if result else "Unknown"
+                                print(f"          FAILED: {error_msg} (code: {error_code})")
+                                hedge_stats['errors'] += 1
+                        except Exception as e:
+                            print(f"          EXCEPTION: {e}")
+                            hedge_stats['errors'] += 1
+        
+        if orphaned_hedges_removed > 0:
+            print(f"\n  ✅ Removed {orphaned_hedges_removed} orphaned hedge(s) from MT5")
+        
+        # Step 4: CRITICAL - Check for closed positions in MT5 history
+        print(f"\n  🔍 Checking MT5 history for closed positions...")
+        
+        # Get history deals from last 7 days
+        from_date = datetime.now() - timedelta(days=7)
+        to_date = datetime.now()
+        
+        # Get all closed positions from MT5 history
+        history_deals = mt5.history_deals_get(from_date, to_date)
+        
+        # Track which positions we've processed for hedging
+        positions_to_hedge = []
+        positions_closed_profit_tickets = []
+        positions_closed_loss_tickets = []
+        
+        if history_deals:
+            # Group deals by position_id to find closed positions
+            closed_positions = {}
+            for deal in history_deals:
+                if deal.type in [mt5.DEAL_TYPE_BUY, mt5.DEAL_TYPE_SELL]:
+                    pos_id = deal.position_id
+                    if pos_id not in closed_positions:
+                        closed_positions[pos_id] = []
+                    closed_positions[pos_id].append(deal)
+            
+            # Check each closed position against our trade history
+            for pos_id, deals in closed_positions.items():
+                # Find the closing deal (profit/loss)
+                closing_deal = None
+                total_profit = 0
+                
+                for deal in deals:
+                    if deal.type in [mt5.DEAL_TYPE_BUY, mt5.DEAL_TYPE_SELL]:
+                        total_profit += deal.profit
+                        # The last deal in the sequence is usually the closing one
+                        closing_deal = deal
+                
+                # Check if this position exists in our trade history
+                if pos_id in trade_details_by_ticket:
+                    trade_record = trade_details_by_ticket[pos_id]
+                    current_status = trade_record.get('status')
+                    
+                    # If position is not running in MT5 but was previously running
+                    if pos_id not in running_tickets and current_status == 'running_position':
+                        is_profitable = total_profit > 0
+                        
+                        print(f"\n    📍 Closed position found: Ticket {pos_id}")
+                        print(f"       • Profit/Loss: ${total_profit:.2f}")
+                        print(f"       • Profitable: {is_profitable}")
+                        
+                        # Update trade history
+                        trade_record['status'] = 'closed'
+                        trade_record['closed_at'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        trade_record['closed_profit'] = total_profit
+                        trade_record['closed_profitable'] = is_profitable
+                        
+                        if is_profitable:
+                            positions_closed_profit_tickets.append(pos_id)
+                            print(f"       ✅ Closed in PROFIT - will remove hedge")
+                        else:
+                            positions_closed_loss_tickets.append(pos_id)
+                            print(f"        Closed in LOSS - keeping hedge for protection")
+            
+            # Save updated trade history
+            if positions_closed_profit_tickets or positions_closed_loss_tickets:
+                try:
+                    with open(history_path, 'w', encoding='utf-8') as f:
+                        json.dump(trade_history_list, f, indent=4)
+                    print(f"\n  💾 Updated trade history with closed position statuses")
+                except Exception as e:
+                    print(f"   Error saving trade history: {e}")
+        
+        # Step 5: Remove hedges for positions that closed in profit
+        if positions_closed_profit_tickets:
+            print(f"\n  🗑️ REMOVING HEDGES FOR PROFITABLE CLOSED POSITIONS...")
+            
+            if signals_file.exists():
+                try:
+                    with open(signals_file, 'r', encoding='utf-8') as f:
+                        limit_orders = json.load(f)
+                    
+                    original_count = len(limit_orders)
+                    orders_to_keep = []
+                    removed_count = 0
+                    
+                    for order in limit_orders:
+                        # Check if this order is a hedge for a closed profitable position
+                        parent_ticket = order.get('parent_ticket')
+                        is_hedge = order.get('is_hedge_order', False)
+                        
+                        if is_hedge and parent_ticket in positions_closed_profit_tickets:
+                            # Remove this hedge order
+                            print(f"    🗑️ Removing hedge for ticket {parent_ticket}: {order.get('order_type', 'unknown')} {order.get('symbol', 'unknown')} @ {order.get('entry', 'unknown')}")
+                            removed_count += 1
+                            hedge_stats['hedges_removed'] += 1
+                            continue
+                        else:
+                            # Keep this order
+                            orders_to_keep.append(order)
+                    
+                    if removed_count > 0:
+                        # Save the filtered orders
+                        with open(signals_file, 'w', encoding='utf-8') as f:
+                            json.dump(orders_to_keep, f, indent=4)
+                        
+                        print(f"\n  ✅ Removed {removed_count} hedge(s) from limit_orders.json")
+                        print(f"  📊 Remaining orders: {len(orders_to_keep)}")
+                        hedge_stats['positions_closed_profit'] += len(positions_closed_profit_tickets)
+                    else:
+                        print(f"  ℹ️ No hedge orders found for closed profitable positions")
+                        
+                except Exception as e:
+                    print(f"   Error processing limit_orders.json: {e}")
+                    hedge_stats['errors'] += 1
+        
+        # Update statistics for loss positions
+        if positions_closed_loss_tickets:
+            hedge_stats['positions_closed_loss'] += len(positions_closed_loss_tickets)
+            print(f"\n  ℹ️ {len(positions_closed_loss_tickets)} position(s) closed in loss - hedges kept as protection")
+        
+        # Step 6: Only process positions that are still running AND not yet hedged
+        if not running_positions:
+            print(f"\n  ℹ️ No running positions found for {user_brokerid}")
+            continue
+        
+        hedge_stats['investors_processed'] += 1
+        hedge_stats['positions_analyzed'] += len(running_positions)
+        
+        # Step 7: Reload existing signals (in case they were updated)
+        if signals_file.exists():
+            try:
+                with open(signals_file, 'r', encoding='utf-8') as f:
+                    existing_signals = json.load(f)
+                print(f"\n  📋 Reloaded {len(existing_signals)} existing signals from limit_orders.json")
+            except Exception as e:
+                print(f"  ⚠️ Error reading existing signals: {e}")
+        
+        # Step 8: Create hedges for remaining running positions (with SL profitability check)
+        hedges_created_for_investor = 0
+        hedges_skipped_due_to_sl_profit = 0
+        
+        for position in running_positions:
+            # Skip if this position itself is a hedge order
+            pos_ticket = position.ticket
+            pos_trade = trade_details_by_ticket.get(pos_ticket, {})
+            if pos_trade.get('is_hedge_order'):
+                print(f"\n  ⏭️ Position #{pos_ticket} is a hedge order - skipping")
+                continue
+            
+            print(f"\n  🔍 Analyzing MT5 position: Ticket {position.ticket}")
+            print(f"     • Symbol: {position.symbol}")
+            print(f"     • Type: {'BUY' if position.type == mt5.ORDER_TYPE_BUY else 'SELL'}")
+            print(f"     • Entry: {position.price_open}")
+            print(f"     • Current: {position.price_current}")
+            print(f"     • Volume: {position.volume}")
+            print(f"     • Profit: ${position.profit:.2f}")
+            
+            # NEW LOGIC: Check if position's SL is at profit/breakeven
+            if is_sl_in_profit(position):
+                print(f"     🎯 SL STATUS: PROTECTED / PROFITABLE")
+                print(f"     • Stoploss: {position.sl if position.sl != 0 else 'NOT SET'}")
+                if position.type == mt5.POSITION_TYPE_BUY:
+                    print(f"     • SL {position.sl} ≥ Entry {position.price_open} → In Profit/BE")
+                else:
+                    print(f"     • SL {position.sl} ≤ Entry {position.price_open} → In Profit/BE")
+                print(f"     ⏭️ SKIPPING hedge creation - SL already protects position")
+                hedges_skipped_due_to_sl_profit += 1
+                hedge_stats['hedges_skipped_sl_profit'] += 1
+                continue
+            
+            # Print SL status if in loss
+            if position.sl != 0:
+                print(f"     ⚠️ SL STATUS: AT RISK")
+                if position.type == mt5.POSITION_TYPE_BUY:
+                    print(f"     • SL {position.sl} < Entry {position.price_open} → In Loss Territory")
+                else:
+                    print(f"     • SL {position.sl} > Entry {position.price_open} → In Loss Territory")
+            else:
+                print(f"     ⚠️ SL STATUS: NO STOPLOSS SET - RISK UNPROTECTED")
+            
+            # Check if hedge already exists for this position
+            hedge_exists = False
+            for signal in existing_signals:
+                if signal.get('parent_ticket') == position.ticket and signal.get('is_hedge_order'):
+                    hedge_exists = True
+                    print(f"     ⏭️ Hedge already exists for this position")
+                    hedge_stats['hedges_skipped'] = hedge_stats.get('hedges_skipped', 0) + 1
+                    break
+            
+            if hedge_exists:
+                continue
+            
+            # Get trade details from history
+            trade_detail = trade_details_by_ticket.get(position.ticket, {})
+            
+            if trade_detail:
+                print(f"     ✅ Found matching trade record")
+                original_order_type = trade_detail.get('placed_order_type', '')
+                exit_price = trade_detail.get('exit', 0)  # This is the stop loss
+                candle_1_high = trade_detail.get('candle_1_high')
+                candle_1_low = trade_detail.get('candle_1_low')
+                candle_1_type = trade_detail.get('candle_1_type', '').lower()
+                timeframe = trade_detail.get('timeframe', '')
+                risk_reward = trade_detail.get('risk_reward', risk_reward_default)
+                volume = trade_detail.get('placed_volume', position.volume)
+                magic = trade_detail.get('magic', position.magic)
+            else:
+                print(f"     ⚠️ No trade record - using MT5 data")
+                original_order_type = 'buy' if position.type == mt5.ORDER_TYPE_BUY else 'sell'
+                exit_price = 0
+                candle_1_high = None
+                candle_1_low = None
+                candle_1_type = ''
+                timeframe = ''
+                risk_reward = risk_reward_default
+                volume = position.volume
+                magic = position.magic
+            
+            # Create hedge (opposite direction)
+            is_position_buy = (position.type == mt5.ORDER_TYPE_BUY)
+            
+            # Flip order type
+            def flip_order_type(original_type, is_buy_position):
+                if original_type:
+                    original_lower = original_type.lower()
+                else:
+                    original_lower = 'buy' if is_buy_position else 'sell'
+                
+                if original_lower == 'instant_buy':
+                    return 'instant_sell'
+                if original_lower == 'instant_sell':
+                    return 'instant_buy'
+                
+                if '_' in original_lower:
+                    parts = original_lower.split('_', 1)
+                    direction = parts[0]
+                    suffix = parts[1]
+                    new_direction = 'sell' if direction == 'buy' else 'buy'
+                    return f"{new_direction}_{suffix}"
+                else:
+                    if original_lower == 'buy':
+                        return 'sell'
+                    elif original_lower == 'sell':
+                        return 'buy'
+                    return original_lower
+            
+            opposite_order_type = flip_order_type(original_order_type, is_position_buy)
+            is_hedge_buy = 'buy' in opposite_order_type.lower()
+            
+            # Hedge entry = parent's exit (stop loss)
+            if exit_price and exit_price > 0:
+                hedge_entry = exit_price
+                print(f"     🎯 Hedge entry (parent SL): {hedge_entry}")
+            else:
+                tick = mt5.symbol_info_tick(position.symbol)
+                hedge_entry = tick.ask if is_hedge_buy else tick.bid if tick else position.price_current
+                print(f"     ⚠️ No SL found - using current price: {hedge_entry}")
+            
+            # Determine digits
+            digits = 5 if hedge_entry < 1 else len(f"{hedge_entry:.10f}".rstrip('0').split('.')[1]) if '.' in f"{hedge_entry:.10f}" else 2
+            
+            # Hedge stop loss based on candle
+            if candle_1_type == "bearish" and candle_1_high:
+                hedge_exit = candle_1_high
+            elif candle_1_type == "bullish" and candle_1_low:
+                hedge_exit = candle_1_low
+            else:
+                hedge_exit = hedge_entry - (hedge_entry * 0.005) if is_hedge_buy else hedge_entry + (hedge_entry * 0.005)
+            
+            hedge_entry = round(hedge_entry, digits)
+            hedge_exit = round(hedge_exit, digits)
+            
+            # Take profit based on risk/reward
+            risk_amount = abs(hedge_entry - hedge_exit)
+            target_distance = risk_amount * risk_reward
+            hedge_target = round(hedge_entry + target_distance if is_hedge_buy else hedge_entry - target_distance, digits)
+            
+            # Validate volume
+            symbol_info = mt5.symbol_info(position.symbol)
+            if symbol_info:
+                volume = max(symbol_info.volume_min, min(symbol_info.volume_max, volume))
+                volume = round(volume, 2)
+            
+            # Create hedge order
+            hedge_id = f"hedge_{position.ticket}_{position.symbol}_{int(datetime.now().timestamp())}"
+            
+            hedge_order = {
+                "symbol": position.symbol,
+                "timeframe": timeframe,
+                "risk_reward": risk_reward,
+                "order_type": opposite_order_type,
+                "entry": hedge_entry,
+                "exit": hedge_exit,
+                "target": hedge_target,
+                "is_hedge_order": True,
+                "hedge_type": "position_hedge",
+                "candle_1_high": round(candle_1_high, digits) if candle_1_high else None,
+                "candle_1_low": round(candle_1_low, digits) if candle_1_low else None,
+                "candle_1_type": candle_1_type,
+                "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "strategy": strategy_name,
+                "magic": magic,
+                "volume": volume,
+                "deriv_volume": volume,
+                "hedge_id": hedge_id,
+                "parent_ticket": position.ticket,
+                "parent_order_type": original_order_type,
+                "parent_entry": position.price_open,
+                "parent_exit": exit_price,
+                "parent_profit": position.profit,
+                "parent_sl_at_creation": position.sl,  # Store current SL for tracking
+                "status": "Calculated",
+                "created_by": "create_position_hedge_function"
+            }
+            
+            # Remove None values
+            hedge_order = {k: v for k, v in hedge_order.items() if v is not None}
+            
+            # Add to signals
+            existing_signals.append(hedge_order)
+            hedges_created_for_investor += 1
+            hedge_stats['hedges_created'] += 1
+            
+            print(f"\n     ✅ HEDGE CREATED: {opposite_order_type.upper()} @ {hedge_entry}")
+            print(f"        • Stop Loss: {hedge_exit} | Target: {hedge_target}")
+            print(f"        • Hedge ID: {hedge_id}")
+        
+        # Step 9: Save updated signals
+        if (hedges_created_for_investor > 0 or hedge_stats['hedges_removed'] > 0 or 
+            orphaned_hedges_removed > 0 or hedges_removed_due_to_sl_profit > 0 or 
+            hedges_skipped_due_to_sl_profit > 0):
+            try:
+                # Save trade history if we made changes
+                if orphaned_hedges_removed > 0 or positions_closed_profit_tickets or positions_closed_loss_tickets:
+                    with open(history_path, 'w', encoding='utf-8') as f:
+                        json.dump(trade_history_list, f, indent=4)
+                
+                # Save limit orders
+                if (hedges_created_for_investor > 0 or hedge_stats['hedges_removed'] > 0 or 
+                    hedges_removed_due_to_sl_profit > 0):
+                    with open(signals_file, 'w', encoding='utf-8') as f:
+                        json.dump(existing_signals, f, indent=4)
+                    
+                    hedge_count = sum(1 for s in existing_signals if s.get('is_hedge_order', False))
+                    print(f"\n  💾 Saved {len(existing_signals)} signals to {signals_file}")
+                    print(f"     • Hedges in file: {hedge_count}")
+                    print(f"     • New hedges added: {hedges_created_for_investor}")
+                    print(f"     • Hedges removed (profit closed): {hedge_stats['hedges_removed']}")
+                    print(f"     • Hedges removed (SL profitable): {hedges_removed_due_to_sl_profit}")
+                    print(f"     • Hedges skipped (SL profitable): {hedges_skipped_due_to_sl_profit}")
+                
+            except Exception as e:
+                print(f"   Error saving signals: {e}")
+                hedge_stats['errors'] += 1
+        
+        # Investor summary
+        print(f"\n  📊 SUMMARY for {user_brokerid}:")
+        print(f"     • Running positions: {len(running_positions)}")
+        print(f"     • Pending orders: {len(pending_orders)}")
+        print(f"     • Closed in profit: {len(positions_closed_profit_tickets)}")
+        print(f"     • Closed in loss: {len(positions_closed_loss_tickets)}")
+        print(f"     • Orphaned hedges removed: {orphaned_hedges_removed}")
+        print(f"     • Hedges created: {hedges_created_for_investor}")
+        print(f"     • Hedges skipped (SL profitable): {hedges_skipped_due_to_sl_profit}")
+        print(f"     • Hedges removed (SL profitable): {hedges_removed_due_to_sl_profit}")
+        print(f"     • Hedges removed from JSON (closed profit): {hedge_stats['hedges_removed']}")
+    
+    # Global summary
+    print("\n" + "="*80)
+    print("📊 GLOBAL HEDGE SUMMARY")
+    print("="*80)
+    print(f"  • Investors processed: {hedge_stats['investors_processed']}")
+    print(f"  • Positions analyzed: {hedge_stats['positions_analyzed']}")
+    print(f"  • Hedges created: {hedge_stats['hedges_created']}")
+    print(f"  • Hedges removed from JSON: {hedge_stats['hedges_removed']}")
+    print(f"  • Hedges skipped (SL profitable): {hedge_stats['hedges_skipped_sl_profit']}")
+    print(f"  • Hedges removed (SL profitable): {hedge_stats['hedges_removed_sl_profit']}")
+    print(f"  • Orphaned hedges closed: {hedge_stats['orphaned_hedges_closed']}")
+    print(f"  • Orphaned hedges cancelled: {hedge_stats['orphaned_hedges_cancelled']}")
+    print(f"  • Positions closed profit: {hedge_stats['positions_closed_profit']}")
+    print(f"  • Positions closed loss: {hedge_stats['positions_closed_loss']}")
+    print(f"  • Errors: {hedge_stats['errors']}")
+    print("="*80)
+    
+    return (hedge_stats['hedges_created'] > 0 or hedge_stats['hedges_removed'] > 0 or 
+            hedge_stats['orphaned_hedges_closed'] > 0 or hedge_stats['orphaned_hedges_cancelled'] > 0 or
+            hedge_stats['hedges_skipped_sl_profit'] > 0 or hedge_stats['hedges_removed_sl_profit'] > 0)
+
 #-------   ###   -------#
 
 def debug_print_all_broker_symbols():
