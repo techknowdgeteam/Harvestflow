@@ -16145,7 +16145,7 @@ def apply_dynamic_breakeven(inv_id=None):
 
 
 # real accounts 
-def process_single_invest(inv_folder):
+def process_single_investor(inv_folder):
     """
     WORKER FUNCTION: Handles the entire pipeline for ONE investor.
     Sequential execution without console output.
@@ -16232,7 +16232,7 @@ def process_single_invest(inv_folder):
     
     return account_stats
 
-def process_single_investor(inv_folder):
+def process_single_invest(inv_folder):
     """
     WORKER FUNCTION: Handles the entire pipeline for ONE investor.
     Sequential execution without console output.
@@ -16406,7 +16406,7 @@ def place_orders_parallel():
         results = pool.map(process_single_investor, investor_folders)
 
     #time.sleep(1)
-    place_orders_parallel()
+   # place_orders_parallel()
     return 
 
 
