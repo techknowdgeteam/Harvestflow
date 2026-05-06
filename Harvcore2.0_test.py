@@ -49,14 +49,13 @@ TIMEFRAME_MAP = {
     
 
 def load_investors_dictionary():
-    BROKERS_JSON_PATH = r"C:\xampp\htdocs\harvcore\harvox\usersdata\investors\demo_investors.json"
     """Load brokers config from JSON file with error handling and fallback."""
-    if not os.path.exists(BROKERS_JSON_PATH):
-        print(f"CRITICAL: {BROKERS_JSON_PATH} NOT FOUND! Using empty config.", "CRITICAL")
+    if not os.path.exists(INVESTOR_USERS):
+        print(f"CRITICAL: {INVESTOR_USERS} NOT FOUND! Using empty config.", "CRITICAL")
         return {}
 
     try:
-        with open(BROKERS_JSON_PATH, 'r', encoding='utf-8') as f:
+        with open(INVESTOR_USERS, 'r', encoding='utf-8') as f:
             data = json.load(f)
         
         # Optional: Convert numeric strings back to int where needed
@@ -2363,17 +2362,14 @@ def investor_broker_symbols(inv_id=None):
         print(f"📊 COMPARING WITH INVESTOR '{inv_id}' CONFIGURATION:\n")
         
         # Load investor config
-        investor_users_path = r"C:\xampp\htdocs\harvcore\harvox\usersdata\investors\demo_investors.json"
-        
-        if os.path.exists(investor_users_path):
-            with open(investor_users_path, 'r', encoding='utf-8') as f:
+        if os.path.exists(INVESTOR_USERS):
+            with open(INVESTOR_USERS, 'r', encoding='utf-8') as f:
                 investor_users = json.load(f)
             
             investor_cfg = investor_users.get(inv_id)
             if investor_cfg:
                 # Get symbols from investor's accountmanagement.json
-                inv_path = r"C:\xampp\htdocs\harvcore\harvox\investors"
-                accountmanagement_path = os.path.join(inv_path, inv_id, "accountmanagement.json")
+                accountmanagement_path = os.path.join(INV_PATH, inv_id, "accountmanagement.json")
                 
                 if os.path.exists(accountmanagement_path):
                     with open(accountmanagement_path, 'r', encoding='utf-8') as f:
@@ -2506,159 +2502,6 @@ def investor_broker_symbols(inv_id=None):
     print(f"{'='*80}\n")
     
     return result
-
-def symbol_spread_alert(inv_id):
-    """
-    High-visibility monitor that identifies the exact timestamp a spread 
-    crossed the danger threshold.
-    """
-    global SPREAD_WIDE_WARNING
-    
-    # =========================================================================
-    # CONSTANTS
-    # =========================================================================
-    SPREAD_WARNING_MULTIPLIER = 1.2 
-    LOOKBACK_MINUTES = 1000
-    SLEEP_BETWEEN_SYMBOLS = 0.1 
-    
-    # =========================================================================
-    # HELPER FUNCTIONS
-    # =========================================================================
-    
-    def load_investor_users_light():
-        path = r"C:\xampp\htdocs\harvcore\harvox\usersdata\investors\demo_investors.json"
-        if not os.path.exists(path): return {}
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            for investor_id, cfg in data.items():
-                iv = cfg.get("INVESTED_WITH", "")
-                cfg["TARGET_FOLDER"] = iv.split("_", 1)[1] if "_" in iv else iv
-            return data
-        except: return {}
-
-    def load_symbols_light(investor_id):
-        path = os.path.join(INV_PATH, investor_id, "accountmanagement.json")
-        if not os.path.exists(path): return []
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            sym_dict = data.get("symbols_dictionary", {})
-            unique = []
-            seen = set()
-            for s_list in sym_dict.values():
-                items = s_list if isinstance(s_list, list) else [s_list]
-                for s in items:
-                    if s not in seen:
-                        unique.append(s)
-                        seen.add(s)
-            return unique
-        except: return []
-
-    def get_spread_data_light(symbol, lookback_minutes=180, threshold_multiplier=2.0):
-        info = mt5.symbol_info(symbol)
-        if not info: return None, None, None
-        point = info.point
-        mt5.symbol_select(symbol, True)
-        
-        rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M1, 0, lookback_minutes)
-        if rates is None or len(rates) == 0: return None, None, None
-        
-        # Calculate Average to establish the 'safety limit'
-        pts = [float(r['spread']) for r in rates]
-        avg_h = sum(pts) / len(pts)
-        safety_limit = avg_h * threshold_multiplier
-        
-        # FIND START TIME: Iterate backwards to find when it first stayed above limit
-        start_time_unix = None
-        for r in reversed(rates):
-            if float(r['spread']) >= safety_limit:
-                start_time_unix = r['time']
-            else:
-                # If we hit a normal candle, the current 'streak' started at the last wide candle
-                break
-        
-        start_time_str = datetime.fromtimestamp(start_time_unix).strftime('%H:%M:%S') if start_time_unix else "Just now"
-        
-        # Live Ticks
-        samples = []
-        for _ in range(5):
-            t = mt5.symbol_info_tick(symbol)
-            if t:
-                samples.append(round(abs(t.ask - t.bid) / point))
-            time.sleep(0.05)
-        
-        curr = max(samples) if samples else pts[-1]
-        return {"avg": round(avg_h, 1), "max": round(max(pts), 1)}, {"curr": curr}, start_time_str
-
-    # =========================================================================
-    # MAIN EXECUTION
-    # =========================================================================
-    
-    print(f"\n[SCAN] Checking Investor: {inv_id}...")
-    
-    cfg = load_investor_users_light().get(inv_id)
-    if not cfg: return False, {"err": "no_cfg"}, False
-    
-    out_dir = os.path.join(INV_PATH, inv_id, cfg.get("TARGET_FOLDER"))
-    os.makedirs(out_dir, exist_ok=True)
-    
-    all_mt5 = [s.name for s in mt5.symbols_get()]
-    symbols = [s for s in load_symbols_light(inv_id) if s in all_mt5]
-    
-    alerts = []
-    
-    for sym in symbols:
-        hist, live, start_time = get_spread_data_light(sym, LOOKBACK_MINUTES, SPREAD_WARNING_MULTIPLIER)
-        if not hist: continue
-        
-        avg = hist["avg"]
-        curr = live["curr"]
-        threshold = avg * SPREAD_WARNING_MULTIPLIER
-        ratio = curr / avg if avg > 0 else 0
-        is_wide = curr >= threshold
-
-        if is_wide:
-            print(f"\n      !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-            print(f"      🚨 PANIC: WIDE SPREAD DETECTED ON {sym}")
-            print(f"      !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-            print(f"      > STARTED AT     : {start_time}")
-            print(f"      > CURRENT SPREAD : {curr:.0f} pts")
-            print(f"      > NORMAL AVERAGE : {avg:.1f} pts")
-            print(f"      > SAFETY LIMIT   : {threshold:.1f} pts")
-            print(f"      > SEVERITY       : {ratio:.2f}x ABOVE NORMAL")
-            print(f"      !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n")
-            
-            alerts.append({
-                "symbol": sym,
-                "start_time": start_time,
-                "metrics": {"avg": avg, "curr": curr, "ratio": round(ratio, 2)}
-            })
-        else:
-            print(f"      ✅ {sym:<10} | OK ({curr:.0f} pts)")
-
-        analysis = {
-            "symbol": sym,
-            "timestamp": datetime.now().isoformat(),
-            "start_of_spike": start_time if is_wide else None,
-            "avg_pts": avg,
-            "curr_pts": curr,
-            "ratio": round(ratio, 2),
-            "is_wide": is_wide
-        }
-        with open(os.path.join(out_dir, f"{sym}_spread.json"), 'w') as f:
-            json.dump(analysis, f, indent=4)
-            
-        time.sleep(SLEEP_BETWEEN_SYMBOLS)
-
-    SPREAD_WIDE_WARNING = {
-        'is_triggered': len(alerts) > 0,
-        'investor_id': inv_id if alerts else None,
-        'symbols': [a['symbol'] for a in alerts],
-        'details': alerts
-    }
-    
-    return len(alerts) > 0, {"alerts": len(alerts)}, True
 
 def delete_all_orders_and_positions(inv_id=None):
     """
@@ -2882,14 +2725,12 @@ def fetch_ohlc_data_for_investor(inv_id):
             
     def load_investor_users():
         """Load investor users config from JSON file."""
-        INVESTOR_USERS_PATH = r"C:\xampp\htdocs\harvcore\harvox\usersdata\investors\demo_investors.json"
-        
-        if not os.path.exists(INVESTOR_USERS_PATH):
-            print(f"CRITICAL: {INVESTOR_USERS_PATH} NOT FOUND! Using empty config.")
+        if not os.path.exists(INVESTOR_USERS):
+            print(f"CRITICAL: {INVESTOR_USERS} NOT FOUND! Using empty config.")
             return {}
 
         try:
-            with open(INVESTOR_USERS_PATH, 'r', encoding='utf-8') as f:
+            with open(INVESTOR_USERS, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             
             # Convert numeric strings back to int where needed
@@ -3423,13 +3264,11 @@ def delete_unauthorized_symbol_files(inv_id):
     
     def load_investor_users():
         """Load investor users config from JSON file."""
-        INVESTOR_USERS_PATH = r"C:\xampp\htdocs\harvcore\harvox\usersdata\investors\demo_investors.json"
-        
-        if not os.path.exists(INVESTOR_USERS_PATH):
+        if not os.path.exists(INVESTOR_USERS):
             return {}
         
         try:
-            with open(INVESTOR_USERS_PATH, 'r', encoding='utf-8') as f:
+            with open(INVESTOR_USERS, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             
             # Extract target folder from INVESTED_WITH
@@ -6112,9 +5951,6 @@ def get_normalized_symbol(record_symbol, risk_keys=None):
     uses USOUSD, USOIL, or WTI.
     """
     if not record_symbol: return None
-
-    NORM_PATH = Path(r"C:\xampp\htdocs\harvcore\harvox\symbols_normalization.json")
-    
     def clean(s): 
         return str(s).replace(" ", "").replace("_", "").replace("/", "").replace(".", "").upper()
 
@@ -6122,9 +5958,9 @@ def get_normalized_symbol(record_symbol, risk_keys=None):
     
     # 1. Load Normalization Map
     norm_data = {}
-    if NORM_PATH.exists():
+    if NORMALIZE_SYMBOLS_PATH.exists():
         try:
-            with open(NORM_PATH, 'r', encoding='utf-8') as f:
+            with open(NORMALIZE_SYMBOLS_PATH, 'r', encoding='utf-8') as f:
                 norm_data = json.load(f).get("NORMALIZATION", {})
         except: pass
 
@@ -16999,7 +16835,7 @@ def apply_dynamic_breakeven(inv_id=None):
 
 
 # real accounts 
-def process_single_invest(inv_folder):
+def process_single_investor(inv_folder):
     """
     WORKER FUNCTION: Handles the entire pipeline for ONE investor.
     Sequential execution without console output.
@@ -17070,7 +16906,7 @@ def process_single_invest(inv_folder):
         #calculate_investor_symbols_orders(inv_id=inv_id)
         #live_usd_risk_and_scaling(inv_id=inv_id)
         #place_usd_orders(inv_id=inv_id)   
-        restricted_timerange(inv_id=inv_id)
+        fetch_ohlc_data_for_investor(inv_id=inv_id)
         #check_pending_orders_risk(inv_id=inv_id)
     
         mt5.shutdown()
@@ -17088,7 +16924,7 @@ def process_single_invest(inv_folder):
     
     return account_stats
 
-def process_single_investor(inv_folder):
+def process_single_invest(inv_folder):
     """
     WORKER FUNCTION: Handles the entire pipeline for ONE investor.
     Sequential execution without console output.
@@ -17262,7 +17098,7 @@ def place_orders_parallel():
         results = pool.map(process_single_investor, investor_folders)
 
     #time.sleep(1)
-    place_orders_parallel()
+    #place_orders_parallel()
     return 
 
 
