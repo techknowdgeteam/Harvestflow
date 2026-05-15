@@ -1,0 +1,30 @@
+{
+  "1":     {
+      "id": "1",
+      "broker": "Deriv",
+      "email": "knnyking12@gmail.com",
+      "fullname": "Arobieke Kehinde Adeyemi",
+      "server": "Deriv-Demo",
+      "login": "5996427",
+      "password": "@Techknowdge12#",
+      "application_status": "pending",
+      "broker_balance": "NULL",
+      "profitandloss": "NULL",
+      "passkey": "NULL",
+      "submitted_at": "NULL",
+      "balance_display": "NULL",
+      "execution_start_date": "NULL",
+      "broker_balance_history": "NULL",
+      "execution_dates_history": "NULL",
+      "profitandlosshistory": "NULL",
+      "trades": "NULL",
+      "tradeshistory": "NULL",
+      "loyalties": "NULL",
+      "contract_days_left": "NULL",
+      "paymentdetails": "NULL",
+      "message": "NULL",
+      "unauthorized_actions": "NULL",
+      "notifications": "NULL",
+      "executions_history": "NULL"
+    }
+}

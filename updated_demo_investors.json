@@ -5,23 +5,703 @@
         "login": "40940152",
         "password": "@Techknowdge12#",
         "application_status": "approved",
-        "broker_balance": 2810.62,
-        "profitandloss": 0.0,
-        "contract_days_left": "38",
+        "broker_balance": 2794.31,
+        "profitandloss": -12.01,
+        "contract_days_left": "25",
         "execution_start_date": "May 05, 2026",
-        "last_audit_timestamp": "2026-04-27T16:08:39.983473",
-        "current_balance": 2810.62,
+        "last_audit_timestamp": "2026-05-10T07:33:53.268392",
+        "current_balance": 2782.3,
         "trades": {
             "summary": {
-                "total_trades": 0,
-                "won": 0,
-                "lost": 0,
-                "symbols_that_lost": {},
-                "symbols_that_won": {}
+                "total_trades": 75,
+                "won": 12,
+                "lost": 24,
+                "symbols_that_lost": {
+                    "Volatility 75 Index": -53.9
+                },
+                "symbols_that_won": {
+                    "Volatility 75 Index": 50.38
+                }
             },
-            "authorized_closed_trades": []
+            "authorized_closed_trades": [
+                {
+                    "ticket": 4598505826,
+                    "symbol": "Volatility 75 Index",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": 0.0,
+                    "time": "2026-05-07 19:10:44",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4598578065,
+                    "symbol": "Volatility 75 Index",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": -2.56,
+                    "time": "2026-05-07 20:26:26",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4598515139,
+                    "symbol": "Volatility 75 Index",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": 0.0,
+                    "time": "2026-05-07 20:26:26",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4598581112,
+                    "symbol": "Volatility 75 Index",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": 0.0,
+                    "time": "2026-05-07 21:07:32",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4598627184,
+                    "symbol": "Volatility 75 Index",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": -2.78,
+                    "time": "2026-05-07 21:26:52",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4598612982,
+                    "symbol": "Volatility 75 Index",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": 0.0,
+                    "time": "2026-05-07 21:26:52",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4598647437,
+                    "symbol": "Volatility 75 Index",
+                    "type": "SELL",
+                    "volume": 0.017,
+                    "profit": 0.0,
+                    "time": "2026-05-07 22:17:22",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4598657582,
+                    "symbol": "Volatility 75 Index",
+                    "type": "BUY",
+                    "volume": 0.017,
+                    "profit": -2.18,
+                    "time": "2026-05-07 22:28:08",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4598653907,
+                    "symbol": "Volatility 75 Index",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": 0.0,
+                    "time": "2026-05-07 22:28:08",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4598668604,
+                    "symbol": "Volatility 75 Index",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": -3.31,
+                    "time": "2026-05-07 22:59:18",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4598670485,
+                    "symbol": "Volatility 75 Index",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": -3.53,
+                    "time": "2026-05-07 23:02:04",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4598688002,
+                    "symbol": "Volatility 75 Index",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": 4.39,
+                    "time": "2026-05-07 23:32:34",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4598679366,
+                    "symbol": "Volatility 75 Index",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": 0.0,
+                    "time": "2026-05-07 23:50:18",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4598812752,
+                    "symbol": "Volatility 75 Index",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": 7.31,
+                    "time": "2026-05-08 04:28:58",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4598813132,
+                    "symbol": "Volatility 75 Index",
+                    "type": "BUY",
+                    "volume": 0.013,
+                    "profit": 0.0,
+                    "time": "2026-05-08 04:45:32",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4598824283,
+                    "symbol": "Volatility 75 Index",
+                    "type": "SELL",
+                    "volume": 0.013,
+                    "profit": -2.03,
+                    "time": "2026-05-08 04:58:44",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4598819689,
+                    "symbol": "Volatility 75 Index",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": 0.0,
+                    "time": "2026-05-08 04:58:44",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4598836233,
+                    "symbol": "Volatility 75 Index",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": -2.57,
+                    "time": "2026-05-08 05:23:32",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4598838701,
+                    "symbol": "Volatility 75 Index",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": 0.0,
+                    "time": "2026-05-08 05:56:30",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4598852203,
+                    "symbol": "Volatility 75 Index",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": 0.0,
+                    "time": "2026-05-08 06:17:02",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4598860521,
+                    "symbol": "Volatility 75 Index",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": -2.62,
+                    "time": "2026-05-08 06:17:20",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4598852328,
+                    "symbol": "Volatility 75 Index",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": 0.0,
+                    "time": "2026-05-08 06:17:20",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4598888740,
+                    "symbol": "Volatility 75 Index",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": 0.0,
+                    "time": "2026-05-08 07:18:08",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4598915878,
+                    "symbol": "Volatility 75 Index",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": -2.8,
+                    "time": "2026-05-08 07:39:24",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4598889079,
+                    "symbol": "Volatility 75 Index",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": 0.0,
+                    "time": "2026-05-08 07:39:24",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4598929585,
+                    "symbol": "Volatility 75 Index",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": -3.75,
+                    "time": "2026-05-08 08:01:04",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4598938764,
+                    "symbol": "Volatility 75 Index",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": 0.0,
+                    "time": "2026-05-08 09:27:16",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4599015892,
+                    "symbol": "Volatility 75 Index",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": -2.61,
+                    "time": "2026-05-08 09:55:38",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4598997744,
+                    "symbol": "Volatility 75 Index",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": 0.0,
+                    "time": "2026-05-08 09:55:38",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4598997580,
+                    "symbol": "Volatility 75 Index",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": 0.0,
+                    "time": "2026-05-08 10:04:40",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4599051979,
+                    "symbol": "Volatility 75 Index",
+                    "type": "BUY",
+                    "volume": 0.011,
+                    "profit": 0.0,
+                    "time": "2026-05-08 10:48:48",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4599076991,
+                    "symbol": "Volatility 75 Index",
+                    "type": "SELL",
+                    "volume": 0.011,
+                    "profit": 0.0,
+                    "time": "2026-05-08 11:22:00",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4599072810,
+                    "symbol": "Volatility 75 Index",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": 0.0,
+                    "time": "2026-05-08 11:26:16",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4599111493,
+                    "symbol": "Volatility 75 Index",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": 8.7,
+                    "time": "2026-05-08 12:01:14",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4599131351,
+                    "symbol": "Volatility 75 Index",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": 0.0,
+                    "time": "2026-05-08 13:02:12",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4599209178,
+                    "symbol": "Volatility 75 Index",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": -2.08,
+                    "time": "2026-05-08 13:44:04",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4599155994,
+                    "symbol": "Volatility 75 Index",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": 0.0,
+                    "time": "2026-05-08 13:44:04",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4599209764,
+                    "symbol": "Volatility 75 Index",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": 7.57,
+                    "time": "2026-05-08 13:44:38",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4599216492,
+                    "symbol": "Volatility 75 Index",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": 6.44,
+                    "time": "2026-05-08 13:50:20",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4599229074,
+                    "symbol": "Volatility 75 Index",
+                    "type": "BUY",
+                    "volume": 0.012,
+                    "profit": 0.0,
+                    "time": "2026-05-08 14:06:20",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4599251910,
+                    "symbol": "Volatility 75 Index",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": -3.1,
+                    "time": "2026-05-08 14:27:38",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4599254226,
+                    "symbol": "Volatility 75 Index",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": 0.03,
+                    "time": "2026-05-08 14:30:14",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4599285167,
+                    "symbol": "Volatility 75 Index",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": 0.02,
+                    "time": "2026-05-08 14:47:20",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4599311282,
+                    "symbol": "Volatility 75 Index",
+                    "type": "SELL",
+                    "volume": 0.012,
+                    "profit": 6.11,
+                    "time": "2026-05-08 15:02:14",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4599340749,
+                    "symbol": "Volatility 75 Index",
+                    "type": "SELL",
+                    "volume": 0.012,
+                    "profit": 0.0,
+                    "time": "2026-05-08 15:19:02",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4599374809,
+                    "symbol": "Volatility 75 Index",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": 0.0,
+                    "time": "2026-05-08 15:57:38",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4599391635,
+                    "symbol": "Volatility 75 Index",
+                    "type": "BUY",
+                    "volume": 0.012,
+                    "profit": 0.02,
+                    "time": "2026-05-08 16:06:44",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4599477516,
+                    "symbol": "Volatility 75 Index",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": 0.0,
+                    "time": "2026-05-08 18:04:08",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4599508098,
+                    "symbol": "Volatility 75 Index",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": -3.07,
+                    "time": "2026-05-08 18:45:10",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4599533040,
+                    "symbol": "Volatility 75 Index",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": 0.0,
+                    "time": "2026-05-08 19:34:48",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4599607222,
+                    "symbol": "Volatility 75 Index",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": 0.0,
+                    "time": "2026-05-08 21:44:10",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4599634285,
+                    "symbol": "Volatility 75 Index",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": -0.06,
+                    "time": "2026-05-08 21:47:40",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4599707702,
+                    "symbol": "Volatility 75 Index",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": 9.75,
+                    "time": "2026-05-09 00:57:42",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4599698676,
+                    "symbol": "Volatility 75 Index",
+                    "type": "SELL",
+                    "volume": 0.013,
+                    "profit": 0.0,
+                    "time": "2026-05-09 01:38:06",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4599726729,
+                    "symbol": "Volatility 75 Index",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": -0.05,
+                    "time": "2026-05-09 01:51:22",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4599740796,
+                    "symbol": "Volatility 75 Index",
+                    "type": "BUY",
+                    "volume": 0.013,
+                    "profit": 0.02,
+                    "time": "2026-05-09 02:28:34",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4599864904,
+                    "symbol": "Volatility 75 Index",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": 0.0,
+                    "time": "2026-05-09 07:57:36",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4599882770,
+                    "symbol": "Volatility 75 Index",
+                    "type": "BUY",
+                    "volume": 0.012,
+                    "profit": 0.0,
+                    "time": "2026-05-09 08:07:30",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4599898225,
+                    "symbol": "Volatility 75 Index",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": -2.91,
+                    "time": "2026-05-09 08:26:46",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4599938574,
+                    "symbol": "Volatility 75 Index",
+                    "type": "SELL",
+                    "volume": 0.012,
+                    "profit": -0.01,
+                    "time": "2026-05-09 09:30:32",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4599901111,
+                    "symbol": "Volatility 75 Index",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": 0.0,
+                    "time": "2026-05-09 13:05:04",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4600059653,
+                    "symbol": "Volatility 75 Index",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": 0.0,
+                    "time": "2026-05-09 13:38:20",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4600077897,
+                    "symbol": "Volatility 75 Index",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": -2.28,
+                    "time": "2026-05-09 13:38:32",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4600059737,
+                    "symbol": "Volatility 75 Index",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": 0.0,
+                    "time": "2026-05-09 13:38:32",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4600082080,
+                    "symbol": "Volatility 75 Index",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": 0.0,
+                    "time": "2026-05-09 14:23:40",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4600111086,
+                    "symbol": "Volatility 75 Index",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": -3.6,
+                    "time": "2026-05-09 14:28:00",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4600111583,
+                    "symbol": "Volatility 75 Index",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": -3.64,
+                    "time": "2026-05-09 14:28:34",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4600122845,
+                    "symbol": "Volatility 75 Index",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": -0.01,
+                    "time": "2026-05-09 14:43:16",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4600178207,
+                    "symbol": "Volatility 75 Index",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": 0.0,
+                    "time": "2026-05-09 16:10:46",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4600214800,
+                    "symbol": "Volatility 75 Index",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": -2.28,
+                    "time": "2026-05-09 16:53:20",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4600187319,
+                    "symbol": "Volatility 75 Index",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": 0.0,
+                    "time": "2026-05-09 16:53:20",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4600228995,
+                    "symbol": "Volatility 75 Index",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": 0.0,
+                    "time": "2026-05-09 18:03:24",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4600321639,
+                    "symbol": "Volatility 75 Index",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": -0.07,
+                    "time": "2026-05-09 19:39:28",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4600278890,
+                    "symbol": "Volatility 75 Index",
+                    "type": "BUY",
+                    "volume": 0.01,
+                    "profit": 0.0,
+                    "time": "2026-05-09 19:40:00",
+                    "match_method": "magic"
+                },
+                {
+                    "ticket": 4600367840,
+                    "symbol": "Volatility 75 Index",
+                    "type": "SELL",
+                    "volume": 0.01,
+                    "profit": 0.02,
+                    "time": "2026-05-09 20:57:22",
+                    "match_method": "magic"
+                }
+            ]
         },
-        "authorized_tickets_count": 978,
+        "authorized_tickets_count": 1013,
         "magic_number": 0,
         "unauthorized_actions": {
             "detected": false,
